@@ -9,7 +9,9 @@
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "typecheck": "tsc -noEmit -skipLibCheck",
     "secrets": "gitleaks git --pre-commit --redact --staged --verbose",
-    "secrets:all": "gitleaks dir . --redact --verbose"
+    "secrets:all": "gitleaks dir . --redact --verbose",
+    "install:dev": "node scripts/install-dev.mjs",
+    "poc:frontmatter": "node poc/frontmatter-roundtrip.mjs"
   },
   "keywords": ["obsidian", "obsidian-plugin", "markdown", "review", "comments", "annotations"],
   "author": "omars-lab",
@@ -22,6 +24,7 @@
     "esbuild": "^0.24.0",
     "obsidian": "latest",
     "tslib": "^2.8.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "yaml": "^2.6.0"
   }
 }

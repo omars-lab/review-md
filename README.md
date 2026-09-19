@@ -38,6 +38,9 @@ Symlink or copy `main.js`, `manifest.json`, `styles.css` into a vault's
 - **gitleaks** runs on every commit (pre-commit) and is available as `npm run secrets`.
 - **dotenvx**: local secrets go in an encrypted `.env` (committable); the private key lives in
   `.env.keys` which is git-ignored. Never commit `.env.keys`.
+- The dotenvx private key is backed up in **LastPass** at
+  `dotenvx/review-md/DOTENV_PRIVATE_KEY` (Password field), matching the `dotenvx/<project>/…`
+  convention. Restore a fresh checkout's key with `make env-restore` (requires `lpass login`).
 
 ## License
 

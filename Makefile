@@ -29,4 +29,9 @@ secrets-all: ## Scan the whole working tree for secrets
 precommit: ## Run all pre-commit hooks against all files
 	pre-commit run --all-files
 
+env-restore: ## Restore .env.keys from LastPass (requires `lpass login`)
+	@printf 'DOTENV_PRIVATE_KEY="%s"\n' \
+		"$$(lpass show 'dotenvx/review-md/DOTENV_PRIVATE_KEY' --password | tr -d '\r\n')" \
+		> .env.keys && chmod 600 .env.keys && echo "restored .env.keys from LastPass (chmod 600)"
+
 check: typecheck secrets-all ## Run the full local gate

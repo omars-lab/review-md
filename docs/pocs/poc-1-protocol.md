@@ -12,7 +12,7 @@ replies) fires `x-success`.
 |---|---|
 | Handler registered (`registerObsidianProtocolHandler("review-md", …)`) | built in `src/main.ts` |
 | Open file + jump to `^thread` + `x-success`/`x-error` | built (self-reports to `POC-1-report.md`) |
-| End-to-end run in Obsidian | ⏳ pending one-time GUI enable |
+| End-to-end run in Obsidian | **PASS** ✅ (2026-09-19, live sandbox) |
 
 The handler is **self-reporting**: on fire it writes `POC-1-report.md` into the vault, so the result
 is verifiable from the file system without the dev console.
@@ -45,5 +45,11 @@ is verifiable from the file system without the dev console.
 
 ## Verdict
 
-Pending the one-time GUI enable. All code is in place and self-reporting; this is expected to PASS
-(protocol handlers are a stable, documented API). Record the result here after running.
+**PASS** (2026-09-19). Fired `open 'obsidian://review-md?vault=.dev-vault&file=sample.md&thread=anchor-me'`
+against the live sandbox instance (plugin trusted + enabled); the handler fired, opened `sample.md`,
+received the `thread=anchor-me` param, and wrote `POC-1-report.md` = **RESULT: PASS**. Routing by
+vault **name** (`.dev-vault`) worked; the vault id (`e6e5eb32f7b6710b`) is the fallback.
+
+Note: the report's `action:` field shows `review-md` (the protocol action name), not our optional
+`action=reply` param — `params.action` is the registered handler name, so reply-mode is keyed off a
+separate param in the real build. Cosmetic to the POC; requirements 1/4/5 plumbing confirmed.

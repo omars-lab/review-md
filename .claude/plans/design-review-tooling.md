@@ -35,6 +35,15 @@ tool does "click anywhere on the render → per-file, git-tracked thread." So we
    per this requirement, sidecar is the documented fallback if it doesn't scale.)
 8. Feedback is **git-friendly and agent-parseable** — a schema we own end-to-end (carried over
    from the original requirement 4, the load-bearing one).
+9. **Comment on a Mermaid diagram node, and the comment renders as a connected node *inside* the
+   diagram** (Omar, 2026-09-19). Chosen model: **augmented render, non-destructive.** Threads stay in
+   frontmatter (req 7); at render time the plugin re-runs Mermaid on `original source + injected
+   comment nodes/edges` so the rendered diagram becomes "Mermaid + comments" while the stored
+   ```mermaid block is untouched. Overlay is toggleable; resolving a thread removes its node; clicking
+   a comment node opens the thread. A separate **"Bake comments into diagram"** command emits a merged
+   `.md`/diagram copy for sharing outside Obsidian (the destructive form, on demand only). Rejected:
+   baking into source by default (pollutes the authored diagram, fights req 7) and badge-pins-only
+   (doesn't make the comment a graph node, which is the ask).
 
 ## The host: Obsidian plugin preferred; standalone is the fallback
 
@@ -84,12 +93,25 @@ review:
         src: "img/foo.png"   # whole-image anchor; in-image coordinates deferred (docs/backlog.md)
       resolved: false
       messages: [ ... ]
+    - id: q9r4tz
+      anchor:
+        type: mermaidNode     # comment on a node inside a ```mermaid block (req 9)
+        blockId: k3x9qp       # the mermaid code block's own ^blockId (which diagram)
+        node: C               # mermaid node id (or a label-hash fallback if the node is unnamed)
+        quote: "human comments"   # node label at comment time, for re-anchoring if ids change
+      resolved: false
+      messages: [ ... ]
 ```
 
 - **Text anchor** = section line + `quote` + a persisted `^blockId`. Re-anchor by: try `blockId`,
   else fuzzy-match `quote` near `line`. Section granularity is the accepted floor.
 - **Image anchor** = the image as a whole (its `src`); no coordinates for now. (Schema leaves room
   to add optional `nx,ny,w,h` later without a breaking change — see backlog.)
+- **Mermaid-node anchor** (req 9) = which diagram (`blockId`) + which node (`node` id, `quote` =
+  label fallback). At render time the plugin injects, per unresolved thread, a comment node + dashed
+  edge (`C -.💬.-> <threadId>(["<first line> · N replies"]):::rvw`) and re-renders; clicking the
+  injected node opens the thread. The stored ```mermaid source is never mutated (the "Bake" command
+  is the only path that writes injected nodes into a diagram, into a separate copy).
 - **Agent contract:** `review-design` reads `review.threads[]` directly — stable keys, documented
   here. Unresolved threads with the anchor `quote` are its findings input.
 
@@ -139,10 +161,34 @@ Checkpoint the repo (`git init`) before the first spike so throwaways are recove
 | **POC-3** | Can we start/render an image-anchored thread in reading mode? | Inspect the *real* image DOM (devtools) for `![alt]()` and `![[embed]]`; click → thread; show a has-threads badge. | Clicking either image form starts a thread and the badge redraws on reload. (No coordinates.) |
 | **POC-4** ⭐ | **Go/no-go: does frontmatter storage scale (req 7)?** | `processFrontMatter` write ~50 threads w/ replies; reload; check YAML fidelity, Properties-UI, cache. | 50 threads round-trip without corrupting the doc or breaking the note; else adopt **sidecar/hybrid** (ids in frontmatter, bodies in `.review/`), documented. |
 | **POC-5** | *(fallback — run only if POC-1 or POC-4 fail)* Standalone renderer viable? | markdown-it + mermaid + footnote + source-map plugin; click → source range; own URL scheme. | Core loop (click→thread→store→link) works outside Obsidian. → pivot host. |
+| **POC-6** ⭐ | **Mermaid augmented render (req 9): can we intercept a rendered mermaid block, map node→SVG `<g class="node">` for click, and swap in a re-rendered diagram with injected comment nodes?** | Post-processor finds `.mermaid` output; hook clicks on nodes; call the Mermaid API on `source + injected nodes` and replace the SVG; toggle overlay. Confirm the live SVG structure via devtools first (CLAUDE.md). | Clicking a diagram node starts a thread; the injected comment node appears connected in the render and redraws on reload/resolve; stored ```mermaid source unchanged. If mermaid re-render can't be driven, fall back to badge-pins-on-nodes (still frontmatter-backed) and note it. |
 
 **Gate:** POC-1 and POC-4 are go/no-go for the plugin. If both pass (expected), build the plugin;
 record the confirmation in `docs/pocs/host-decision.md`. Only if one fails do we run POC-5 and
-reconsider the standalone. POC-2/POC-3 tune the plugin, they don't gate it.
+reconsider the standalone. POC-2/POC-3/POC-6 are feature spikes — they shape *how* text/image/mermaid
+comments work, they don't gate the plugin decision. **POC-1 already PASSED live (2026-09-19).**
+
+## Dev & test automation (verified 2026-09-19 — `docs/issues/obsidian-automation-gate.md`)
+
+We can run the whole POC/dev loop from the shell in an **isolated sandbox** that never touches the
+real Obsidian config. What's verified:
+
+- **Isolated instance:** `/Applications/Obsidian.app/Contents/MacOS/Obsidian --user-data-dir=<scratch>`
+  relocates all global state to `<scratch>`; the default `~/Library/Application Support/obsidian` is
+  untouched.
+- **Auto-open a vault:** pre-write `<scratch>/obsidian.json` =
+  `{"vaults":{"<rand 16-hex>":{"path":"<abs>","ts":<ms>,"open":true}}}` **before launch**.
+- **Install the plugin:** symlink build output into `<vault>/.obsidian/plugins/review-md/` and list
+  it in `community-plugins.json` (`scripts/install-dev.mjs` does this).
+- **Official CLI (Obsidian ≥1.12.7, we have 1.13.7):**
+  `/Applications/Obsidian.app/Contents/MacOS/obsidian-cli` gives `eval`, `plugin:enable`,
+  `plugin:reload`, `dev:screenshot` (in-process capture — no Screen Recording perm), `devtools`.
+  Enable it once at **Settings → General → Advanced → Command line interface**, then drive POCs with
+  `obsidian eval code="…"` and capture with `obsidian dev:screenshot path=…`.
+- **The one manual step:** click *Trust author…* (or *Browse in Restricted Mode* + let the CLI
+  `app.plugins.enablePlugin('review-md')`). Do it **once**; trust persists in the `--user-data-dir`,
+  so snapshot that dir and every later run is click-free. Alt for CI: Playwright on the unpacked
+  `app.asar` clicks the button deterministically (`qawatake/obsidian-e2e-sample` pattern).
 
 ## Phased build (after the POC gate)
 
@@ -155,7 +201,10 @@ reconsider the standalone. POC-2/POC-3 tune the plugin, they don't gate it.
    per POC-2 outcome.
 4. **P3 — URLs:** `review-md` open/focus/reply actions + `x-success`/`x-error`; share-thread and
    copy-reply-link commands; native fallback links.
-5. **P4 — image comments:** whole-image threads + has-threads badge per POC-3 (no coordinates).
+5. **P4 — image + mermaid comments:** whole-image threads + has-threads badge per POC-3 (no
+   coordinates); **Mermaid node comments per POC-6** (req 9) — click node → thread, augmented render
+   injecting comment nodes from frontmatter, overlay toggle, and a **"Bake comments into diagram"**
+   command that writes the merged diagram to a separate copy for external sharing.
 6. **P5 — agent loop:** wire `review-design` to read threads; round-trip smoke test; `review-setup`
    validation skill (PASS/FAIL checklist, scriptable vs GUI-only steps separated).
 
@@ -200,8 +249,10 @@ and links were in the prior evaluation; the gap they leave is precisely requirem
 - **Node:** repo will get a `.nvmrc`; don't run bare `node` (v18) — `nvm use` first.
 - **Look at the real render** before hardcoding DOM selectors for images/sections (CLAUDE.md rule;
   the research explicitly could not confirm current class strings live).
-- **Enabling a community plugin is GUI-only** (Restricted Mode off + trust); a setup skill guides
-  it, can't script it. For dev, symlink/copy into `.obsidian/plugins/review-md/`.
+- **The trust gate is the one unscriptable step** (see `docs/issues/obsidian-automation-gate.md`):
+  first-open of a plugin-bearing vault shows a *Trust author?* modal; no file bypasses it
+  (`app.json` is `{}`, `community-plugins.json` only *lists* the plugin). Everything *around* it is
+  scriptable — see "Dev & test automation" below.
 - **Document pivots** in `docs/issues/<slug>.md`; POC findings in `docs/pocs/<slug>.md`; deferred
   scope in `docs/backlog.md` (image coordinates + char-precise anchoring already parked there).
 - Keep the agent-facing schema stable and documented — it's the load-bearing contract.

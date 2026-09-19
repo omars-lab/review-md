@@ -161,12 +161,13 @@ Checkpoint the repo (`git init`) before the first spike so throwaways are recove
 | **POC-3** | Can we start/render an image-anchored thread in reading mode? | Inspect the *real* image DOM (devtools) for `![alt]()` and `![[embed]]`; click → thread; show a has-threads badge. | Clicking either image form starts a thread and the badge redraws on reload. (No coordinates.) |
 | **POC-4** ⭐ | **Go/no-go: does frontmatter storage scale (req 7)?** | `processFrontMatter` write ~50 threads w/ replies; reload; check YAML fidelity, Properties-UI, cache. | 50 threads round-trip without corrupting the doc or breaking the note; else adopt **sidecar/hybrid** (ids in frontmatter, bodies in `.review/`), documented. |
 | **POC-5** | *(fallback — run only if POC-1 or POC-4 fail)* Standalone renderer viable? | markdown-it + mermaid + footnote + source-map plugin; click → source range; own URL scheme. | Core loop (click→thread→store→link) works outside Obsidian. → pivot host. |
-| **POC-6** ⭐ | **Mermaid augmented render (req 9): can we intercept a rendered mermaid block, map node→SVG `<g class="node">` for click, and swap in a re-rendered diagram with injected comment nodes?** | Post-processor finds `.mermaid` output; hook clicks on nodes; call the Mermaid API on `source + injected nodes` and replace the SVG; toggle overlay. Confirm the live SVG structure via devtools first (CLAUDE.md). | Clicking a diagram node starts a thread; the injected comment node appears connected in the render and redraws on reload/resolve; stored ```mermaid source unchanged. If mermaid re-render can't be driven, fall back to badge-pins-on-nodes (still frontmatter-backed) and note it. |
+| **POC-6** ⭐ | **PASS ✅ (2026-09-19, live).** Mermaid augmented render (req 9): intercept a rendered mermaid block, map node→SVG `<g class="node">`, swap in a re-rendered diagram with frontmatter-driven comment nodes. | **Post-processor** (NOT `registerMarkdownCodeBlockProcessor` — built-in mermaid can't be overridden that way): read fence source via `getSectionInfo`, read `mermaidNode` threads from frontmatter, wait for built-in SVG then swap in `window.mermaid.render(source + injected nodes)`; click node → thread. Re-applies on every render. `docs/pocs/poc-6-mermaid.md`. | **MET** — clicking a comment node fires its thread; injected nodes appear connected (dashed 💬 edges, ✓ when resolved) and redraw on reload; stored ```mermaid source unchanged. No fallback to badge-pins needed. |
 
 **Gate:** POC-1 and POC-4 are go/no-go for the plugin. If both pass (expected), build the plugin;
 record the confirmation in `docs/pocs/host-decision.md`. Only if one fails do we run POC-5 and
 reconsider the standalone. POC-2/POC-3/POC-6 are feature spikes — they shape *how* text/image/mermaid
-comments work, they don't gate the plugin decision. **POC-1 already PASSED live (2026-09-19).**
+comments work, they don't gate the plugin decision. **POC-1, POC-4 and POC-6 all PASSED live
+(2026-09-19).**
 
 ## Dev & test automation (verified 2026-09-19 — `docs/issues/obsidian-automation-gate.md`)
 

@@ -1,4 +1,4 @@
-import { Plugin, Notice, TFile, normalizePath } from "obsidian";
+import { Plugin, Notice, TFile, normalizePath, MarkdownPostProcessorContext } from "obsidian";
 
 /**
  * review-md — scaffold entry point.
@@ -64,6 +64,19 @@ export default class ReviewMdPlugin extends Plugin {
       id: "poc4-seed-verify-frontmatter",
       name: "POC-4 seed & verify frontmatter threads",
       callback: () => void this.runPoc4(),
+    });
+
+    // POC-6: augmented mermaid render. Obsidian renders mermaid through its own
+    // markdown renderer (not the public code-block registry), so we can't
+    // override it with registerMarkdownCodeBlockProcessor. Instead we
+    // post-process: wait for the built-in SVG, then replace it with a render of
+    // `source + injected comment nodes`. Running inside the post-processor means
+    // it re-applies on every re-render (scroll/edit) — unlike a one-shot DOM
+    // poke, which Obsidian's next render reverts. Diagram source is untouched.
+    this.registerMarkdownPostProcessor((el, ctx) => {
+      const src = this.mermaidSourceFor(el, ctx);
+      if (src === null) return;
+      this.augmentRenderedMermaid(el, src, ctx.sourcePath);
     });
   }
 
@@ -138,6 +151,102 @@ export default class ReviewMdPlugin extends Plugin {
       `> Record that observation in docs/pocs/poc-4-frontmatter.md.\n`;
     await this.writeVaultFile("POC-4-report.md", report);
     new Notice(`review-md POC-4: ${pass ? "PASS" : "FAIL"} — see POC-4-report.md`);
+  }
+
+  /**
+   * If `el` is a rendered mermaid code block, return its diagram source (from
+   * the file's raw text via getSectionInfo, so it's the stored source verbatim);
+   * otherwise null. The post-processor runs for every section, so this is the
+   * cheap filter that skips paragraphs, tables, etc.
+   */
+  private mermaidSourceFor(el: HTMLElement, ctx: MarkdownPostProcessorContext): string | null {
+    if (!el.querySelector(".mermaid, code.language-mermaid, pre.language-mermaid")) return null;
+    const info = ctx.getSectionInfo(el);
+    if (!info) return null;
+    const lines = info.text.split("\n").slice(info.lineStart, info.lineEnd + 1);
+    if (!/^\s*```+\s*mermaid\s*$/.test(lines[0] ?? "")) return null;
+    return lines.slice(1, -1).join("\n"); // strip the ``` fences
+  }
+
+  /** mermaidNode threads whose anchored node id appears in *this* diagram. */
+  private mermaidCommentsFor(source: string, sourcePath: string): ReviewThread[] {
+    const fm = this.app.metadataCache.getCache(sourcePath)?.frontmatter as
+      | { review?: { threads?: ReviewThread[] } }
+      | undefined;
+    return (fm?.review?.threads ?? []).filter((t) => {
+      const a = t.anchor as { type?: string; node?: string };
+      return (
+        a?.type === "mermaidNode" &&
+        typeof a.node === "string" &&
+        new RegExp(`(^|[^\\w])${a.node}([^\\w]|$)`, "m").test(source)
+      );
+    });
+  }
+
+  /** Build `original source + one dashed comment node per thread` (source untouched). */
+  private buildAugmentedSource(source: string, comments: ReviewThread[]): string {
+    const escape = (s: string) => s.replace(/"/g, "'").replace(/\n/g, " ").slice(0, 60);
+    const cmtId = (t: ReviewThread) => `rvw_${t.id}`;
+    const lines = comments.map((t) => {
+      const a = t.anchor as { node: string };
+      const first = t.messages[0]?.body ?? "(comment)";
+      const n = t.messages.length;
+      const label = `${escape(first)}<br/>💬 ${n} ${n === 1 ? "msg" : "msgs"}${t.resolved ? " ✓" : ""}`;
+      return `  ${a.node} -. "💬" .-> ${cmtId(t)}(["${label}"])`;
+    });
+    return (
+      source.trimEnd() +
+      "\n" +
+      lines.join("\n") +
+      `\n  classDef reviewCmt fill:#fff3bf,stroke:#f0c000,color:#5c3d00,rx:6,ry:6` +
+      `\n  class ${comments.map(cmtId).join(",")} reviewCmt`
+    );
+  }
+
+  /**
+   * POC-6: replace the built-in mermaid SVG with an augmented render carrying a
+   * comment node per thread. Waits (via observer) for the built-in SVG to land,
+   * then swaps once; if there are no threads for this diagram it leaves the
+   * native render untouched.
+   */
+  private augmentRenderedMermaid(el: HTMLElement, source: string, sourcePath: string): void {
+    const comments = this.mermaidCommentsFor(source, sourcePath);
+    if (!comments.length) return; // no threads → stay 100% native
+    const mermaid = (window as unknown as { mermaid?: any }).mermaid;
+    if (!mermaid?.render) return;
+
+    const augmented = this.buildAugmentedSource(source, comments);
+    let applied = false;
+    const obs = new MutationObserver(() => {
+      if (el.querySelector("svg")) void doApply();
+    });
+    const doApply = async (): Promise<void> => {
+      if (applied) return;
+      applied = true;
+      obs.disconnect();
+      try {
+        const { svg, bindFunctions } = await mermaid.render("reviewmd-" + mkId(), augmented);
+        el.empty();
+        const host = el.createDiv({ cls: "review-md-mermaid" });
+        host.innerHTML = svg;
+        bindFunctions?.(host);
+        for (const t of comments) {
+          const g = host.querySelector(`g.node[id^="flowchart-rvw_${t.id}-"]`);
+          if (g) {
+            (g as SVGElement).style.cursor = "pointer";
+            g.addEventListener("click", (e) => {
+              e.stopPropagation();
+              new Notice(`thread ${t.id}: ${t.messages.length} message(s)`);
+            });
+          }
+        }
+      } catch (err) {
+        applied = false; // let a later mutation retry
+        console.error("[review-md] mermaid augment failed", err);
+      }
+    };
+    obs.observe(el, { childList: true, subtree: true });
+    if (el.querySelector("svg")) void doApply();
   }
 
   private async writeVaultFile(path: string, content: string): Promise<void> {

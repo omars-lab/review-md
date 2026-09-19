@@ -1,0 +1,20 @@
+# Pre-commit hooks for review-md.
+# Uses `repo: local` so hooks run the tools already installed on the machine
+# (gitleaks, dotenvx) — no network fetch, and identical to the `make` targets
+# CI runs (local == CI parity, per CLAUDE.md).
+#
+# Install:  make hooks   (or: pre-commit install)
+repos:
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks — block secrets in staged changes
+        entry: gitleaks git --pre-commit --staged --redact --verbose
+        language: system
+        pass_filenames: false
+
+      - id: dotenvx-precommit
+        name: dotenvx — block committing plaintext .env / .env.keys
+        entry: dotenvx ext precommit
+        language: system
+        pass_filenames: false

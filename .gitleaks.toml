@@ -1,0 +1,20 @@
+# gitleaks config for review-md.
+# Extends gitleaks' built-in ruleset and adds allowlists for false positives
+# that our dotenvx workflow legitimately produces.
+title = "review-md gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist"
+paths = [
+  # dotenvx-encrypted .env holds ONLY ciphertext + a public key — safe to commit.
+  '''^\.env$''',
+  # Generated bundle.
+  '''^main\.js$''',
+]
+# dotenvx encrypts values as `encrypted:BASE64...`; never flag those.
+regexes = [
+  '''encrypted:[A-Za-z0-9+/=]+''',
+]

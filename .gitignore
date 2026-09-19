@@ -1,0 +1,25 @@
+# --- Node / build ---
+node_modules/
+dist/
+# esbuild output (the built plugin bundle; built from src/)
+main.js
+*.log
+.DS_Store
+
+# --- dotenvx: NEVER commit decryption keys or plaintext local env ---
+# .env.keys holds the private keys — committing it defeats encryption.
+.env.keys
+.env.local
+.env.*.local
+
+# NOTE: the encrypted .env (dotenvx) IS meant to be committed — it holds
+# ciphertext only. Do NOT add a bare `.env` ignore or the encrypted file
+# gets excluded.
+
+# --- Obsidian machine-local state (when a dev vault lives here) ---
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+
+# --- POC / scratch ---
+poc/**/node_modules/
+poc/**/main.js

@@ -56,7 +56,9 @@ review:
 An Obsidian plugin to review any markdown file: click any rendered element to drop
 a comment, each comment is its own chat thread, threads live in the file's
 frontmatter (git-friendly, agent-parseable), and threads are shareable/repliable via
-`obsidian://` x-callback URLs.
+`obsidian://` x-callback URLs. The full URL API (one action per operation:
+`review-md-open`, `review-md-reply`) is documented in [`docs/api/`](docs/api/xcallback.md)
+— generated from `src/protocol/xcallback.schema.json` and kept in sync by a pre-commit hook.
 
 ## Architecture
 
@@ -65,7 +67,7 @@ threads from this file's frontmatter.
 
 ```mermaid
 flowchart TB
-  URL["obsidian://review-md?file=…&thread=…"] --> PH[Protocol handler]
+  URL["obsidian://review-md-open?vault=…&file=…&thread=…"] --> PH[Protocol handler]
   PH --> RV[Reviewer view]
   RV -->|click a rendered element| CS[Comment store · frontmatter]
   CS --> MA[Mermaid augmenter]

@@ -11,7 +11,9 @@
     "secrets": "gitleaks git --pre-commit --redact --staged --verbose",
     "secrets:all": "gitleaks dir . --redact --verbose",
     "install:dev": "node scripts/install-dev.mjs",
-    "poc:frontmatter": "node poc/frontmatter-roundtrip.mjs"
+    "poc:frontmatter": "node poc/frontmatter-roundtrip.mjs",
+    "api:docs": "node scripts/gen-xcallback-api.mjs",
+    "api:check": "node scripts/gen-xcallback-api.mjs --check"
   },
   "keywords": ["obsidian", "obsidian-plugin", "markdown", "review", "comments", "annotations"],
   "author": "omars-lab",

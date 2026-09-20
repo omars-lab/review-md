@@ -18,3 +18,10 @@ repos:
         entry: dotenvx ext precommit
         language: system
         pass_filenames: false
+
+      - id: xcallback-api
+        name: x-callback API docs in sync with schema
+        entry: node scripts/gen-xcallback-api.mjs --check
+        language: system
+        pass_filenames: false
+        files: '^(src/protocol/xcallback\.schema\.json|scripts/gen-xcallback-api\.mjs|docs/api/)'

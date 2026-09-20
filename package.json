@@ -13,7 +13,8 @@
     "install:dev": "node scripts/install-dev.mjs",
     "poc:frontmatter": "node poc/frontmatter-roundtrip.mjs",
     "api:docs": "node scripts/gen-xcallback-api.mjs",
-    "api:check": "node scripts/gen-xcallback-api.mjs --check"
+    "api:check": "node scripts/gen-xcallback-api.mjs --check",
+    "threads": "node scripts/review-threads.mjs"
   },
   "keywords": ["obsidian", "obsidian-plugin", "markdown", "review", "comments", "annotations"],
   "author": "omars-lab",

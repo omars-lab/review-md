@@ -148,8 +148,12 @@ review:
   only when the reviewed file is git-tracked, for **identity and retrieval** (`git show <commit>:<file>`),
   never for staleness. Optional and Node-optional: on mobile/restricted renderers `git` is omitted and
   `bodyHash` still computes via Web Crypto. Full trade-offs: `docs/issues/version-stamping.md`.
-- **Agent contract:** `review-design` reads `review.threads[]` directly — stable keys, documented
-  here. Unresolved threads with the anchor `quote` are its findings input.
+- **Agent contract:** `review-design` reads threads from the **sidecar** `review.threads[]`
+  (not the reviewed file's frontmatter — that moved in req 7). Unresolved threads with the anchor
+  `quote` are its findings input. Stable keys + the headless reader are documented in
+  [`docs/agent-contract.md`](../../docs/agent-contract.md); `scripts/review-threads.mjs`
+  (`npm run threads -- <file> [--unresolved|--json]`) is the off-Obsidian read path, re-deriving the
+  same bodyHash the plugin stamps so an agent can trust the staleness flag.
 
 ### x-callback URL scheme (requirements 1, 4, 5) — **BUILT & PROVEN LIVE 2026-09-19**
 
@@ -308,8 +312,15 @@ real Obsidian config. What's verified:
    (source + sidecar untouched; verified: 4 overlay nodes → 0 → 4, persisted to `data.json`).
    ✅ **injected comment nodes excluded from comment-mode anchoring 2026-09-19** — a click on a
    `rvw_<id>` node opens its existing thread instead of minting a comment-on-a-comment.
-6. **P5 — agent loop:** wire `review-design` to read threads; round-trip smoke test; `review-setup`
-   validation skill (PASS/FAIL checklist, scriptable vs GUI-only steps separated).
+6. **P5 — agent loop:** ✅ **in-repo half built 2026-09-20.** The reviewed-file→sidecar thread
+   contract is documented in [`docs/agent-contract.md`](../../docs/agent-contract.md) (anchor shapes,
+   findings = unresolved threads + `quote`, staleness = `rev.bodyHash`), with a headless reader
+   `scripts/review-threads.mjs` (`npm run threads -- <file> [--unresolved|--json]`) that reads threads
+   off-Obsidian and re-derives the plugin's exact bodyHash. **Round-trip smoke test proven:** a thread
+   the plugin stamps reads back `outdated:false` and flips to `true` after a body edit; the reader's
+   `current bodyHash` equals `plugin.bodyHashFor`. The `review-setup` PASS/FAIL checklist is captured
+   in the contract doc. Remaining (external, 3d-models PR #278): wire the `review-design`/`review-setup`
+   skills themselves to call this contract.
 7. **P6 — version stamping (req 10):** ✅ **built 2026-09-19.** Every new thread is stamped with a
    `rev` (`buildRev`): `bodyHash` (frontmatter-stripped sha256, via Web Crypto) always, plus
    `git.commit`/`git.blob` when the file is git-tracked (`execFile` on `git`, 4s timeout, silently

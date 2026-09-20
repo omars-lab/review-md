@@ -92,6 +92,31 @@ export function stripFrontmatter(text: string): string {
   return m ? text.slice(m[0].length) : text;
 }
 
+/**
+ * Strip Obsidian block-id markers (`^id`) so they don't count toward the content
+ * hash: they're anchoring scaffolding review-md writes, not reviewed prose, so
+ * adding/removing an anchor must not change `bodyHash`. Matches a trailing ` ^id`
+ * at a line's end and a standalone `^id` line. Deliberately broad (any block id,
+ * not only ours) — a block id is structural metadata by nature.
+ */
+export function stripBlockIds(text: string): string {
+  return text
+    .replace(/[ \t]+\^[A-Za-z0-9_-]+[ \t]*$/gm, "")
+    .replace(/^\^[A-Za-z0-9_-]+[ \t]*$/gm, "");
+}
+
+/**
+ * Remove one specific block id from source text: a trailing ` ^id` on a block's
+ * line, or a standalone `^id` line (with its blank line). Used to clean up when a
+ * thread that owned the id is deleted and no other thread references it.
+ */
+export function removeBlockIdFromText(text: string, blockId: string): string {
+  const esc = blockId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text
+    .replace(new RegExp(`[ \\t]+\\^${esc}(?=[ \\t]*$)`, "gm"), "")
+    .replace(new RegExp(`^\\^${esc}[ \\t]*\\r?\\n?`, "gm"), "");
+}
+
 /** Short hex sha256 of a string (Web Crypto — available in the renderer). */
 async function sha256Short(text: string, len = 12): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -208,6 +233,19 @@ export default class ReviewMdPlugin extends Plugin {
       const src = this.mermaidSourceFor(el, ctx);
       if (src === null) return;
       void this.augmentRenderedMermaid(el, src, ctx.sourcePath);
+    });
+
+    // Durable text anchoring (req: block-refs survive edits): stamp each rendered
+    // section with its source line range so a click can locate the exact source
+    // block to attach a native `^blockId` to. getSectionInfo is only available
+    // here (in a post-processor), not on an arbitrary click — so we cache it onto
+    // the DOM. Line numbers shift on edit, so this is read fresh at click time,
+    // never trusted stale. See docs/issues/durable-anchoring.md.
+    this.registerMarkdownPostProcessor((el, ctx) => {
+      const info = ctx.getSectionInfo(el);
+      if (!info) return;
+      el.dataset.reviewMdLineStart = String(info.lineStart);
+      el.dataset.reviewMdLineEnd = String(info.lineEnd);
     });
 
     // Req 9 (bake): fold the injected comment nodes into the stored ```mermaid
@@ -368,7 +406,16 @@ export default class ReviewMdPlugin extends Plugin {
     const selected = sel && !sel.isCollapsed ? sel.toString().trim() : "";
     const block = target.closest("p, li, td, th, blockquote, h1, h2, h3, h4, h5, h6") as HTMLElement | null;
     const quote = selected || (block?.textContent ?? target.textContent ?? "").trim();
-    return { type: "text", quote: quote.slice(0, 200) };
+    // Source line of the clicked section (stamped by the line post-processor), so
+    // createThread can place a durable `^blockId` on that source block.
+    const secEl = target.closest<HTMLElement>("[data-review-md-line-start]");
+    const rawLine = secEl?.dataset.reviewMdLineStart;
+    const line = rawLine != null && rawLine !== "" ? Number(rawLine) : undefined;
+    return {
+      type: "text",
+      quote: quote.slice(0, 200),
+      ...(line !== undefined && Number.isFinite(line) ? { line } : {}),
+    };
   }
 
   // ---- Comment store: a git-tracked sibling sidecar file ----
@@ -501,19 +548,77 @@ export default class ReviewMdPlugin extends Plugin {
   /** Push a new, message-less thread onto the file's sidecar; return its id. */
   async createThread(file: TFile, anchor: Record<string, unknown>): Promise<string> {
     const id = mkId();
-    // Stamp the reviewed version before writing (bodyHash is of the reviewed
-    // file's body, which the sidecar write never touches).
+    // Stamp the reviewed version before writing. bodyHash strips block-id markers
+    // (see bodyHashFor), so the `^blockId` we may add below never counts as a
+    // content change — it can't false-flag this or any other thread as outdated.
     const rev = await this.buildRev(file);
+    // Text anchors get a durable native block ref so the thread survives edits to
+    // the quoted text and share/reply `#^id` deep-links resolve. blockId may be an
+    // id we mint here, or an existing one already on that block (blocks allow only
+    // one id, so multiple threads on the same block share it). Best-effort: if the
+    // block can't be located the anchor stays quote-only.
+    if ((anchor as { type?: string }).type === "text") {
+      const blockId = await this.ensureTextBlockId(file, id, (anchor as { line?: number }).line);
+      if (blockId) (anchor as Record<string, unknown>).blockId = blockId;
+    }
     await this.mutateReview(file, (data) => {
       data.threads.push({ id, anchor, resolved: false, messages: [], rev });
     });
     return id;
   }
 
-  /** Hash of the file's body (frontmatter stripped) — the reviewed content. */
+  /**
+   * Ensure the source block for a text anchor carries a native `^blockId`, and
+   * return the id to store on the anchor. If the block already has an id we reuse
+   * it (Obsidian allows one id per block; threads on the same block share it);
+   * otherwise we append ` ^<mintId>` to the block's last line. `line` is the
+   * section's 0-based start line (from getSectionInfo, read fresh at click time).
+   * Returns the block id, or null when the block can't be located / placed.
+   */
+  private async ensureTextBlockId(file: TFile, mintId: string, line?: number): Promise<string | null> {
+    if (typeof line !== "number" || !Number.isFinite(line)) return null;
+    const text = await this.app.vault.read(file);
+    const lines = text.split("\n");
+    if (line < 0 || line >= lines.length) return null;
+    // Extend from the section start to the block's last non-blank line (a block is
+    // a run of consecutive non-blank lines), and don't reach into a fenced block.
+    let idx = line;
+    while (idx + 1 < lines.length && lines[idx + 1].trim() !== "" && !/^\s*`{3,}/.test(lines[idx + 1])) {
+      idx++;
+    }
+    while (idx > line && lines[idx].trim() === "") idx--;
+    const target = lines[idx];
+    const existing = target.match(/\s\^([A-Za-z0-9_-]+)\s*$/) ?? target.match(/^\^([A-Za-z0-9_-]+)\s*$/);
+    if (existing) return existing[1];
+    lines[idx] = `${target.replace(/\s+$/, "")} ^${mintId}`;
+    await this.app.vault.modify(file, lines.join("\n"));
+    return mintId;
+  }
+
+  /**
+   * Strip a block id from a file's source when no thread references it any more.
+   * Removes a trailing ` ^id` from a block's line (or a standalone `^id` line).
+   * No-op if the id is still in use by another thread or isn't present.
+   */
+  private async cleanupBlockId(
+    file: TFile,
+    blockId: string | undefined,
+    survivors: ReviewThread[],
+  ): Promise<void> {
+    if (!blockId) return;
+    if (survivors.some((t) => (t.anchor as { blockId?: string }).blockId === blockId)) return;
+    const text = await this.app.vault.read(file);
+    const stripped = removeBlockIdFromText(text, blockId);
+    if (stripped !== text) await this.app.vault.modify(file, stripped);
+  }
+
+  /** Hash of the file's body (frontmatter + block-id markers stripped) — the
+   *  reviewed *content*. Block-ref markers (`^id`) are anchoring scaffolding we
+   *  write, not prose, so they're excluded: adding a comment's anchor must never
+   *  flip this or any other thread to "outdated". See docs/issues/durable-anchoring.md. */
   async bodyHashFor(file: TFile): Promise<string> {
     const text = await this.app.vault.read(file);
-    return sha256Short(stripFrontmatter(text));
+    return sha256Short(stripBlockIds(stripFrontmatter(text)));
   }
 
   /** Version stamp for a new thread: body hash + git commit/blob when available. */
@@ -639,6 +744,7 @@ export default class ReviewMdPlugin extends Plugin {
       from?: string;
       to?: string;
       index?: number;
+      blockId?: string;
     };
     let el: HTMLElement | null = null;
 
@@ -655,8 +761,14 @@ export default class ReviewMdPlugin extends Plugin {
         window.setTimeout(() => path.classList.remove("review-md-edge-flash"), 1600);
         return;
       }
-    } else if (a.type === "text" && a.quote) {
-      el = findBlockContaining(container, a.quote);
+    } else if (a.type === "text") {
+      el = a.quote ? findBlockContaining(container, a.quote) : null;
+      // Quote edited away / not found → fall back to the durable block ref, which
+      // Obsidian re-tracks across edits. Native scroll, no flash (no element yet).
+      if (!el && a.blockId) {
+        this.app.workspace.openLinkText(`${file.path}#^${a.blockId}`, file.path, false);
+        return;
+      }
     }
 
     if (!el) {
@@ -743,14 +855,21 @@ export default class ReviewMdPlugin extends Plugin {
     if (!ok) throw new Error(`message ${threadId}#${index} not found`);
   }
 
-  /** Remove a thread from the file's sidecar entirely. Returns true if one went. */
+  /** Remove a thread from the file's sidecar entirely. Returns true if one went.
+   *  Also strips the thread's source block id when no surviving thread uses it. */
   async deleteThread(file: TFile, threadId: string): Promise<boolean> {
     let removed = false;
+    let orphanBlockId: string | undefined;
+    let survivors: ReviewThread[] = [];
     await this.mutateReview(file, (data) => {
+      const gone = data.threads.find((t) => t.id === threadId);
+      orphanBlockId = (gone?.anchor as { blockId?: string })?.blockId;
       const next = data.threads.filter((t) => t.id !== threadId);
       removed = next.length !== data.threads.length;
       data.threads = next;
+      survivors = next;
     });
+    if (removed) await this.cleanupBlockId(file, orphanBlockId, survivors);
     return removed;
   }
 
@@ -762,12 +881,22 @@ export default class ReviewMdPlugin extends Plugin {
    */
   async pruneEmptyThreads(file: TFile, keepId?: string): Promise<number> {
     const threads = await this.readThreads(file);
-    const doomed = threads.filter((t) => t.messages.length === 0 && t.id !== keepId).length;
-    if (!doomed) return 0;
+    const doomedThreads = threads.filter((t) => t.messages.length === 0 && t.id !== keepId);
+    if (!doomedThreads.length) return 0;
+    let survivors: ReviewThread[] = [];
     await this.mutateReview(file, (data) => {
       data.threads = data.threads.filter((t) => t.messages.length > 0 || t.id === keepId);
+      survivors = data.threads;
     });
-    return doomed;
+    // Strip source block ids left behind by pruned text threads (each only if no
+    // survivor still anchors to it — blocks with several threads share one id).
+    const orphanIds = new Set(
+      doomedThreads
+        .map((t) => (t.anchor as { blockId?: string }).blockId)
+        .filter((b): b is string => !!b),
+    );
+    for (const blockId of orphanIds) await this.cleanupBlockId(file, blockId, survivors);
+    return doomedThreads.length;
   }
 
   /** Toggle a thread's `resolved` flag in the sidecar. */

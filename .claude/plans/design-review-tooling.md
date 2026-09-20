@@ -278,9 +278,18 @@ real Obsidian config. What's verified:
        elision** (`start … end`) so a long quote fits the card (`middleEllipsis`, 60/40 head/tail).
    - Verified end-to-end in the isolated harness: comment-mode click on a text selection created a
      thread persisted to frontmatter; `highlightAnchor` flashed the exact paragraph; sidebar reply
-     round-tripped to disk. **Still TODO:** works in **reading view** only (Live Preview/CodeMirror
-     click-to-comment deferred); durable block-ref anchoring (`^blockId` in source) deferred — text
-     anchors are quote+DOM-match today; pruning of abandoned message-less threads.
+     round-tripped to disk.
+   - **Durable block-ref anchoring** ✅ **built 2026-09-20** — text threads write a native `^blockId`
+     onto the anchored source block (a line post-processor stamps each rendered section's source line
+     range so a click can locate it), so the anchor + every `#^id` deep-link survive edits to the
+     quoted text. blockId = thread id, or an existing id reused when a block already has one (threads
+     on one block share it). Block-id markers are excluded from `bodyHash` (`stripBlockIds`), so
+     anchoring never false-flags staleness; deleting/pruning a thread strips its `^id` only when no
+     surviving thread uses it. Reconciled with the sidecar principle (scaffolding, not payload) in
+     `docs/issues/durable-anchoring.md`. Live-verified: create → `^id` in source + parsed into
+     `metadataCache.blocks`, staleness stays false, shared-id reuse, orphan cleanup.
+   - **Still TODO:** works in **reading view** only (Live Preview/CodeMirror click-to-comment
+     deferred, task #24). Pruning of abandoned message-less threads ✅ (task #26).
 4. **P3 — URLs:** ✅ **built 2026-09-19** — `review-md-open` / `review-md-reply` actions +
    `x-success`/`x-error`, validated against `xcallback.schema.json`, with generated OpenAPI/Swagger
    docs + drift hook. Still TODO: share-thread / copy-reply-link commands, native fallback links.

@@ -30,20 +30,38 @@ tool does "click anywhere on the render → per-file, git-tracked thread." So we
 6. **Comment on images** (a thread anchored to an image as a whole). **Coordinate/region pinning
    within an image is deferred** — not needed now; parked in `docs/backlog.md` (Omar, 2026-09-19:
    "we don't need coordinates for images … ready to trade that off if plugins can work").
-7. **Comments live in the markdown file's frontmatter** — written there on create/reply, and
-   **loaded from there** on open. (Storage trade-off flagged in POC-4; frontmatter is the default
-   per this requirement, sidecar is the documented fallback if it doesn't scale.)
+7. **Comments live in a git-tracked sibling sidecar** `.<name>.comments.md` (for `design.md` →
+   `.design.comments.md`) — written there on create/reply, and **loaded from there** on open.
+   (Originally frontmatter-primary per POC-4; **pivoted to the sidecar** on 2026-09-19 so that
+   commenting never creates a revision on the reviewed file — the reviewed file's git history stays
+   content-only. The sidecar is checked in, not gitignored. Pivot recorded in
+   `docs/issues/comment-sidecar.md`.)
 8. Feedback is **git-friendly and agent-parseable** — a schema we own end-to-end (carried over
    from the original requirement 4, the load-bearing one).
 9. **Comment on a Mermaid diagram node, and the comment renders as a connected node *inside* the
-   diagram** (Omar, 2026-09-19). Chosen model: **augmented render, non-destructive.** Threads stay in
-   frontmatter (req 7); at render time the plugin re-runs Mermaid on `original source + injected
-   comment nodes/edges` so the rendered diagram becomes "Mermaid + comments" while the stored
-   ```mermaid block is untouched. Overlay is toggleable; resolving a thread removes its node; clicking
+   diagram** (Omar, 2026-09-19). Chosen model: **augmented render, non-destructive.** Threads live in
+   the sidecar (req 7 → now the sidecar); at render time the plugin re-runs Mermaid on `original
+   source + injected comment nodes/edges` so the rendered diagram becomes "Mermaid + comments" while
+   the stored ```mermaid block is untouched. Overlay is toggleable; resolving a thread removes its node; clicking
    a comment node opens the thread. A separate **"Bake comments into diagram"** command emits a merged
    `.md`/diagram copy for sharing outside Obsidian (the destructive form, on demand only). Rejected:
    baking into source by default (pollutes the authored diagram, fights req 7) and badge-pins-only
    (doesn't make the comment a graph node, which is the ask).
+9b. **Comment on a Mermaid edge/arrow** (Omar, 2026-09-19). A new `mermaidEdge` anchor
+    (`{blockId, from, to, index}`), detected from the rendered link path's id (`L_<from>_<to>_<n>` —
+    the LS-/LE- classes older mermaid emitted are absent in Obsidian's build, so we key off the id).
+    Chosen model (user-chosen via AskUserQuestion): a **💬 badge overlaid at the edge midpoint**
+    (`getPointAtLength(len/2)`), appended into the edge path's own SVG group so it shares the diagram's
+    coordinate space — non-destructive, no re-render (an edge can't be re-expressed as a mermaid node).
+    Clicking the badge opens the thread; the sidebar card previews the arrow as `from -->|💬| to` with
+    the real node shapes. Built + live-verified 2026-09-19 (task #37).
+10. **Track comments per committed version of the file** (Omar, 2026-09-19). Each thread records the
+    version it was authored against, so a thread can be flagged **outdated** when the reviewed content
+    later changes, and the exact reviewed text retrieved. Chosen model (user-chosen via
+    AskUserQuestion): **hybrid stamp** — a body hash (frontmatter stripped) as the staleness signal,
+    plus git commit/blob for identity/retrieval when the file is git-tracked; and a **badge +
+    retrieve action** UI ("outdated" badge with a *Show reviewed version* button) over silently
+    re-anchoring. Full design + trade-offs: `docs/issues/version-stamping.md`.
 
 ## The host: Obsidian plugin preferred; standalone is the fallback
 
@@ -69,9 +87,13 @@ scheme, and agent-facing schema are identical either way**, so the pivot (if eve
 
 ## Architecture (host-independent)
 
-### Data model — frontmatter schema (requirement 7)
+### Data model — sidecar schema (requirement 7)
 
-Default storage: a `review:` block in the file's YAML frontmatter, read/written atomically. Sketch:
+Storage: a `review:` block in the frontmatter of a git-tracked sibling sidecar `.<name>.comments.md`
+(for `design.md` → `.design.comments.md`), read/written via `vault.adapter` + `parseYaml`/`stringifyYaml`
+(dotfiles aren't indexed by Obsidian, so `processFrontMatter`/`metadataCache` can't touch them). A
+generated markdown body below the frontmatter keeps the file legible on GitHub. Schema sketch (the
+`review:` block, identical to the old frontmatter-primary shape):
 
 ```yaml
 review:
@@ -84,6 +106,12 @@ review:
         blockId: k3x9qp    # persisted into source as `^k3x9qp` so native block-scroll also works
         quote: "radial band mapping"   # exact clicked run, for re-anchoring after edits
       resolved: false
+      rev:                   # version stamp (req 10) — the version this thread was authored against
+        bodyHash: ea936ad0  # sha256 of the doc BODY, frontmatter stripped → the staleness signal
+        ts: 2026-09-20T03:08:23Z
+        git:                 # present only when the file is git-tracked (identity/retrieval only)
+          commit: 8dfd923    #   short HEAD at authoring time
+          blob: 31f7fa6      #   committed blob HEAD:<relpath>
       messages:
         - { author: omar,   ts: 2026-09-19T10:00:00Z, body: "why radial here?" }
         - { author: claude, ts: 2026-09-19T10:05:00Z, body: "..." }
@@ -112,6 +140,14 @@ review:
   edge (`C -.💬.-> <threadId>(["<first line> · N replies"]):::rvw`) and re-renders; clicking the
   injected node opens the thread. The stored ```mermaid source is never mutated (the "Bake" command
   is the only path that writes injected nodes into a diagram, into a separate copy).
+- **Version stamp** (`rev`, req 10) = a per-thread record of the version reviewed. **`bodyHash`**
+  (sha256 of the reviewed file's body with frontmatter stripped) is the **sole staleness signal**. It's
+  git-free and frontmatter-agnostic; since the sidecar move (req 7) comments no longer touch the
+  reviewed file at all, so its whole-file hash is stable too, but `bodyHash` stays the signal because
+  it fires pre-commit and in non-git vaults. `git.commit`/`git.blob` (`HEAD:<relpath>`) are recorded
+  only when the reviewed file is git-tracked, for **identity and retrieval** (`git show <commit>:<file>`),
+  never for staleness. Optional and Node-optional: on mobile/restricted renderers `git` is omitted and
+  `bodyHash` still computes via Web Crypto. Full trade-offs: `docs/issues/version-stamping.md`.
 - **Agent contract:** `review-design` reads `review.threads[]` directly — stable keys, documented
   here. Unresolved threads with the anchor `quote` are its findings input.
 
@@ -205,10 +241,46 @@ real Obsidian config. What's verified:
 1. **P0 — foundations:** `git init` + checkpoint; `.gitignore` (ignore `.obsidian/workspace.json`,
    build output, `node_modules`; track the plugin + any feedback the schema puts in git); Node via
    `.nvmrc`; TS/esbuild scaffold (or the standalone scaffold if pivoted).
-2. **P1 — data layer:** frontmatter (or sidecar) read/write of the schema above; file `uid`; thread
-   id minting; `review-design`-facing parse documented.
-3. **P2 — text threads:** reading-mode click → thread → sidebar list → reply → resolve; anchoring
-   per POC-2 outcome.
+2. **P1 — data layer:** ✅ sidecar (`.<name>.comments.md`) read/write of the schema above via
+   `vault.adapter` + `parseYaml`/`stringifyYaml` (pivoted from frontmatter-primary, 2026-09-19 — see
+   `docs/issues/comment-sidecar.md`); file `uid`; thread id minting; legacy-frontmatter migration on
+   first write; `review-design`-facing parse documented.
+3. **P2 — text threads:** ✅ **built 2026-09-19** — the reviewer UI core:
+   - **Comments sidebar** (`src/views/comments-view.ts`, `ItemView` `review-md-comments`): lists the
+     active file's `review.threads`, open threads first then resolved; each card shows the anchor,
+     messages, a reply box (Send), Copy link, and Resolve/Reopen. Ribbon + command open it. Reads/
+     writes go through shared plugin helpers (`appendReply`, `setThreadResolved`, `threadsForFile`,
+     `buildShareUrl`) so the sidebar and the x-callback `reply` action are **one code path**.
+   - **Comment mode** (click-to-comment authoring, req 2). **Decision (2026-09-19, user-chosen):**
+     a **comment-mode toggle** (ribbon + command) over a selection-popover or context-menu — matches
+     the "click any rendered element" requirement and is uniform across text/image/mermaid. While
+     armed: a **Figma-style speech-bubble cursor** (custom CSS `cursor` on the reading view) signals
+     the doc is click-armed. **Selection-aware:** a click anchors to the highlighted text (stored as
+     `quote`) when there's a selection, else to the clicked image (`{type:image,src}`) or mermaid
+     node (`{type:mermaidNode,node}`), else the clicked block's text. New thread is created
+     message-less; the sidebar focuses it so the first comment is typed there.
+   - **Bidirectional link (user-requested):** clicking a thread's anchor line scrolls the reader to
+     the anchored region and **flashes a highlight** (`.review-md-flash`) over it — text block via
+     quote match, image via `src`, mermaid node via node id. Best-effort; no-op if not rendered.
+   - **Comment-mode toggle hotkey fix (2026-09-19):** the bare `c` toggle was firing while the user
+     typed in a reply box (Obsidian does *not* suppress single-key command hotkeys inside inputs, as
+     an earlier code comment wrongly assumed). Fixed by dropping the forced command hotkey and using a
+     guarded `document` keydown handler that ignores `c` when the target is an input/textarea/select/
+     contenteditable/`.cm-editor` (`isTypingTarget`). Verified: `c` in a reply box types the letter;
+     `c` on the body toggles the mode.
+   - **Reviewer-card previews (2026-09-19)** — each thread card shows a small preview of what it
+     anchors to, so the reviewer sees the target without leaving the sidebar:
+     - *Mermaid-node threads* render a **mini Mermaid preview of just the commented node** (its own
+       shape + label, re-rendered via `window.mermaid.render`), background themed to the card
+       (`background: transparent` on the SVG so the card's `--background-primary` shows through, not
+       Mermaid's hardcoded light fill).
+     - *Text threads* render the anchored quote as a **small italic blockquote** with **middle
+       elision** (`start … end`) so a long quote fits the card (`middleEllipsis`, 60/40 head/tail).
+   - Verified end-to-end in the isolated harness: comment-mode click on a text selection created a
+     thread persisted to frontmatter; `highlightAnchor` flashed the exact paragraph; sidebar reply
+     round-tripped to disk. **Still TODO:** works in **reading view** only (Live Preview/CodeMirror
+     click-to-comment deferred); durable block-ref anchoring (`^blockId` in source) deferred — text
+     anchors are quote+DOM-match today; pruning of abandoned message-less threads.
 4. **P3 — URLs:** ✅ **built 2026-09-19** — `review-md-open` / `review-md-reply` actions +
    `x-success`/`x-error`, validated against `xcallback.schema.json`, with generated OpenAPI/Swagger
    docs + drift hook. Still TODO: share-thread / copy-reply-link commands, native fallback links.
@@ -217,9 +289,21 @@ real Obsidian config. What's verified:
    injecting comment nodes from frontmatter. ✅ **"Bake comments into diagram" command built
    2026-09-19** — folds the injected comment nodes into the file's own ```mermaid fences in place
    (idempotent: skips already-baked threads; the live augmenter stands down on baked threads so
-   there's no double injection). Still TODO: overlay toggle.
+   there's no double injection). Still TODO: overlay toggle; **exclude injected comment nodes from
+   comment-mode anchoring** so a click on a `rvw_<id>` node opens its thread instead of creating a
+   comment-on-a-comment (observed 2026-09-19 in the dogfood vault: an armed click on a comment node
+   minted a stray thread anchored to `rvw_d1a2b3`).
 6. **P5 — agent loop:** wire `review-design` to read threads; round-trip smoke test; `review-setup`
    validation skill (PASS/FAIL checklist, scriptable vs GUI-only steps separated).
+7. **P6 — version stamping (req 10):** ✅ **built 2026-09-19.** Every new thread is stamped with a
+   `rev` (`buildRev`): `bodyHash` (frontmatter-stripped sha256, via Web Crypto) always, plus
+   `git.commit`/`git.blob` when the file is git-tracked (`execFile` on `git`, 4s timeout, silently
+   omitted off-git or on mobile). The sidebar compares each thread's `rev.bodyHash` to the current
+   body hash and, on mismatch, shows an **"outdated" badge** + "commented on `<commit|hash>`" + a
+   **Show reviewed version** button that recovers the reviewed text (`git show <commit>:<file>` →
+   strip frontmatter → snippet around the anchor quote; falls back to the stored `quote` off-git).
+   Verified empirically: adding/editing a comment does **not** flip staleness (frontmatter excluded),
+   a body edit does, and reverting clears it. `docs/issues/version-stamping.md`.
 
 ## Key research findings (from the API research pass — trust, don't re-derive)
 

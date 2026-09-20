@@ -292,8 +292,20 @@ real Obsidian config. What's verified:
      surviving thread uses it. Reconciled with the sidecar principle (scaffolding, not payload) in
      `docs/issues/durable-anchoring.md`. Live-verified: create → `^id` in source + parsed into
      `metadataCache.blocks`, staleness stays false, shared-id reuse, orphan cleanup.
-   - **Still TODO:** works in **reading view** only (Live Preview/CodeMirror click-to-comment
-     deferred, task #24). Pruning of abandoned message-less threads ✅ (task #26).
+   - **Live Preview parity (#24)** ✅ **built 2026-09-20** — click-to-comment and the mermaid overlay
+     now work in **Live Preview (CM6)**, not just reading view. Authoring: clicks resolve through the
+     CM6 surface (`editorSurfaceFor` + `cm.posAtCoords` for text; the mermaid/image DOM is structurally
+     identical to reading view, so node/edge/image anchors reuse the same resolver). Highlighting picks
+     its surface via `view.getMode()` ("source" vs "preview") and deep-links text via `#^blockId` in the
+     editor. **Overlay re-injection:** markdown post-processors *never fire in CM6* (proven: 0 stamped
+     elements), so the overlay is driven by a debounced `MutationObserver` on each source-mode editor's
+     `.cm-content` (`ensureLivePreviewAugmenter`/`scanLivePreviewMermaid`) that maps each mermaid widget
+     to its source (`cm.posAtDOM` → fence body from the live buffer) and calls the same
+     `augmentRenderedMermaid`; self-heals on CM6 rebuild, guarded against re-entry. Toggle branches on
+     mode (reading: `rerender`; source: scan/strip). Live-verified in `.dev-vault`: LP `rvwNodes:3,
+     hosts:2, edgeBadges:1`; toggle off→`0,0`, on→`3,1`; reading view unchanged (`3,1`). Pivot written
+     up in `docs/issues/live-preview-mermaid-overlay.md`.
+   - Pruning of abandoned message-less threads ✅ (task #26).
 4. **P3 — URLs:** ✅ **built 2026-09-19** — `review-md-open` / `review-md-reply` actions +
    `x-success`/`x-error`, validated against `xcallback.schema.json`, with generated OpenAPI/Swagger
    docs + drift hook. ✅ **completed 2026-09-20** — three commands on the focused thread

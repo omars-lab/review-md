@@ -312,6 +312,10 @@ export default class ReviewMdPlugin extends Plugin {
     // Clear the selection so the highlight flash reads cleanly afterwards.
     window.getSelection()?.removeAllRanges();
 
+    // A previous click that never got a first comment left an empty thread —
+    // clicking again abandons it, so sweep empties before minting the new one.
+    await this.pruneEmptyThreads(file);
+
     try {
       const id = await this.createThread(file, anchor);
       await this.activateCommentsView();
@@ -748,6 +752,22 @@ export default class ReviewMdPlugin extends Plugin {
       data.threads = next;
     });
     return removed;
+  }
+
+  /**
+   * Drop abandoned message-less threads — a click creates a thread immediately,
+   * so a click the user never followed up with a first comment leaves an empty
+   * thread in the sidecar. `keepId` is the thread currently being composed (never
+   * pruned). No-op (no sidecar write) when there's nothing to prune.
+   */
+  async pruneEmptyThreads(file: TFile, keepId?: string): Promise<number> {
+    const threads = await this.readThreads(file);
+    const doomed = threads.filter((t) => t.messages.length === 0 && t.id !== keepId).length;
+    if (!doomed) return 0;
+    await this.mutateReview(file, (data) => {
+      data.threads = data.threads.filter((t) => t.messages.length > 0 || t.id === keepId);
+    });
+    return doomed;
   }
 
   /** Toggle a thread's `resolved` flag in the sidecar. */

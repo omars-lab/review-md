@@ -65,7 +65,12 @@ export class CommentsView extends ItemView {
   private syncActiveFile(): void {
     const active = this.app.workspace.getActiveFile();
     const next = active && active.extension === "md" ? active : this.file;
-    if (next !== this.file) this.file = next;
+    if (next !== this.file) {
+      // Leaving a file abandons any thread there we never gave a first comment.
+      const prev = this.file;
+      this.file = next;
+      if (prev && prev !== next) void this.plugin.pruneEmptyThreads(prev);
+    }
     void this.refresh();
   }
 

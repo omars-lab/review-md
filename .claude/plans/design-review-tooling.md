@@ -302,10 +302,12 @@ real Obsidian config. What's verified:
    injecting comment nodes from frontmatter. ✅ **"Bake comments into diagram" command built
    2026-09-19** — folds the injected comment nodes into the file's own ```mermaid fences in place
    (idempotent: skips already-baked threads; the live augmenter stands down on baked threads so
-   there's no double injection). Still TODO: overlay toggle; **exclude injected comment nodes from
-   comment-mode anchoring** so a click on a `rvw_<id>` node opens its thread instead of creating a
-   comment-on-a-comment (observed 2026-09-19 in the dogfood vault: an armed click on a comment node
-   minted a stray thread anchored to `rvw_d1a2b3`).
+   there's no double injection). ✅ **overlay toggle built 2026-09-20** — a "Toggle mermaid comment
+   overlay" command flips a persisted `showMermaidComments` setting; off, `augmentRenderedMermaid`
+   stands down and re-rendering the open reading views hands the DOM back to Obsidian's native SVG
+   (source + sidecar untouched; verified: 4 overlay nodes → 0 → 4, persisted to `data.json`).
+   ✅ **injected comment nodes excluded from comment-mode anchoring 2026-09-19** — a click on a
+   `rvw_<id>` node opens its existing thread instead of minting a comment-on-a-comment.
 6. **P5 — agent loop:** wire `review-design` to read threads; round-trip smoke test; `review-setup`
    validation skill (PASS/FAIL checklist, scriptable vs GUI-only steps separated).
 7. **P6 — version stamping (req 10):** ✅ **built 2026-09-19.** Every new thread is stamped with a

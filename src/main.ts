@@ -32,6 +32,17 @@ interface XcallbackOperation {
   params: XcallbackParam[];
 }
 
+/** Persisted plugin settings. Comments live in the sidecar, so `loadData` is
+ *  free for genuine UI preferences like this one. */
+interface ReviewMdSettings {
+  /** Show the augmented mermaid comment nodes / edge badges in the live render.
+   *  Off → diagrams render 100% native (comments still exist in the sidecar). */
+  showMermaidComments: boolean;
+}
+const DEFAULT_SETTINGS: ReviewMdSettings = {
+  showMermaidComments: true,
+};
+
 /**
  * review-md — scaffold entry point.
  *
@@ -152,9 +163,11 @@ export default class ReviewMdPlugin extends Plugin {
   /** True while "comment mode" is armed: the reader is click-to-comment. */
   private commentMode = false;
   private commentRibbon: HTMLElement | null = null;
+  settings: ReviewMdSettings = { ...DEFAULT_SETTINGS };
 
   async onload(): Promise<void> {
     console.log("[review-md] loaded");
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 
     // One Obsidian action per operation: obsidian://review-md-open?..., review-md-reply?...
     // We can't use a single handler with an `action`/`op` query selector because
@@ -275,6 +288,33 @@ export default class ReviewMdPlugin extends Plugin {
       name: "Bake comments into diagram(s)",
       callback: () => void this.bakeMermaidComments(),
     });
+
+    // Overlay toggle (P4): show/hide the injected comment nodes + edge badges in
+    // the live render without touching the diagram source or the sidecar. Off
+    // renders diagrams 100% native; re-rendering the open reading views makes the
+    // augmenter (which now stands down) hand the DOM back to Obsidian's native SVG.
+    this.addCommand({
+      id: "toggle-mermaid-comments",
+      name: "Toggle mermaid comment overlay",
+      callback: () => void this.toggleMermaidComments(),
+    });
+  }
+
+  /** Flip the mermaid-overlay preference, persist it, and re-render open reading
+   *  views so the change takes effect immediately (both directions). */
+  private async toggleMermaidComments(): Promise<void> {
+    this.settings.showMermaidComments = !this.settings.showMermaidComments;
+    await this.saveData(this.settings);
+    this.app.workspace
+      .getLeavesOfType("markdown")
+      .map((l) => l.view)
+      .filter((v): v is MarkdownView => v instanceof MarkdownView)
+      .forEach((v) => v.previewMode?.rerender(true));
+    new Notice(
+      this.settings.showMermaidComments
+        ? "review-md: mermaid comment overlay shown"
+        : "review-md: mermaid comment overlay hidden",
+    );
   }
 
   onunload(): void {
@@ -1183,6 +1223,7 @@ export default class ReviewMdPlugin extends Plugin {
    * native render untouched.
    */
   private async augmentRenderedMermaid(el: HTMLElement, source: string, sourcePath: string): Promise<void> {
+    if (!this.settings.showMermaidComments) return; // overlay hidden → stay 100% native
     const comments = await this.mermaidCommentsFor(source, sourcePath);
     const edgeComments = await this.mermaidEdgeCommentsFor(source, sourcePath);
     if (!comments.length && !edgeComments.length) return; // no threads → stay 100% native

@@ -3,6 +3,7 @@ import {
   Notice,
   TFile,
   MarkdownView,
+  Editor,
   normalizePath,
   MarkdownPostProcessorContext,
   parseYaml,
@@ -86,6 +87,18 @@ export interface ReviewData {
 }
 
 const mkId = () => Math.random().toString(36).substring(2, 8);
+
+/** The slice of CodeMirror 6's EditorView we use to map clicks ↔ source in Live
+ *  Preview. `editor.cm` is undocumented in Obsidian's public API, so we type only
+ *  what we touch. `posAtCoords` → source offset for a click; `contentDOM` holds
+ *  the rendered widgets (mermaid SVG, images) we query and flash. */
+interface CmEditorView {
+  posAtCoords(coords: { x: number; y: number }): number | null;
+  contentDOM: HTMLElement;
+}
+function cmOf(editor: Editor): CmEditorView | null {
+  return (editor as unknown as { cm?: CmEditorView }).cm ?? null;
+}
 
 /** Node's `require`, or undefined on mobile / restricted renderers. */
 function nodeRequire(mod: string): any {
@@ -362,16 +375,28 @@ export default class ReviewMdPlugin extends Plugin {
     return el.closest(".markdown-reading-view, .markdown-preview-view");
   }
 
+  /** If the click landed in a Live Preview / source CM6 editor, return that view's
+   *  editor so a text click can be mapped coord→source. Null outside an editor. */
+  private editorSurfaceFor(el: HTMLElement): Editor | null {
+    if (!el.closest(".cm-editor")) return null;
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    return view?.editor ?? null;
+  }
+
   /** In comment mode, turn a click in the reader into a new thread. */
   private async handleCommentClick(evt: MouseEvent): Promise<void> {
     if (!this.commentMode) return;
     const target = evt.target as HTMLElement | null;
     if (!target) return;
-    // Ignore clicks outside a rendered reading view (sidebar, editor, chrome).
-    if (!this.readingContainerFor(target)) return;
+    // A reviewable surface is either a rendered reading view OR a Live Preview /
+    // source CM6 editor (#24). Anything else (sidebar, chrome) is ignored.
+    const reading = this.readingContainerFor(target);
+    const editor = reading ? null : this.editorSurfaceFor(target);
+    if (!reading && !editor) return;
     // The frontmatter/Properties block isn't reviewable content — a click there
-    // would anchor a "text" thread to the serialised metadata. Skip it.
-    if (target.closest(".metadata-container, .frontmatter, .metadata-property")) return;
+    // would anchor a "text" thread to the serialised metadata. Skip it (both the
+    // reading-view Properties widget and the LP `.cm-line` frontmatter/its widget).
+    if (target.closest(".metadata-container, .frontmatter, .metadata-property, .cm-hmd-frontmatter")) return;
 
     const file = this.app.workspace.getActiveFile();
     if (!file || file.extension !== "md") return;
@@ -404,7 +429,10 @@ export default class ReviewMdPlugin extends Plugin {
       return;
     }
 
-    const anchor = this.resolveClickAnchor(target);
+    const anchor = this.resolveClickAnchor(
+      target,
+      editor ? { editor, x: evt.clientX, y: evt.clientY } : undefined,
+    );
     // Clear the selection so the highlight flash reads cleanly afterwards.
     window.getSelection()?.removeAllRanges();
 
@@ -423,8 +451,14 @@ export default class ReviewMdPlugin extends Plugin {
     }
   }
 
-  /** Decide what a click anchors to: mermaid node, edge, image, or text/selection. */
-  private resolveClickAnchor(target: HTMLElement): Record<string, unknown> {
+  /** Decide what a click anchors to: mermaid node, edge, image, or text/selection.
+   *  In the Live Preview / source CM6 surface, `ctx` carries the editor + click
+   *  coords so the text branch can map the click to a source line (#24). The
+   *  mermaid/image branches are DOM-based and identical across both surfaces. */
+  private resolveClickAnchor(
+    target: HTMLElement,
+    ctx?: { editor: Editor; x: number; y: number },
+  ): Record<string, unknown> {
     // 1) A mermaid node (inside our augmented SVG or the native one).
     const node = target.closest("g.node");
     if (node) {
@@ -459,7 +493,21 @@ export default class ReviewMdPlugin extends Plugin {
       const src = img.getAttribute("src") ?? "";
       return { type: "image", src };
     }
-    // 3) Text: prefer the live selection, else the clicked block's text.
+    // 3) Text in the CM6 editor surface: map the click to a source position via
+    // posAtCoords (exact, no reliance on the reading-view line post-processor).
+    if (ctx) {
+      const cm = cmOf(ctx.editor);
+      const selected = ctx.editor.getSelection().trim();
+      const pos = cm?.posAtCoords({ x: ctx.x, y: ctx.y });
+      const line = pos != null ? ctx.editor.offsetToPos(pos).line : undefined;
+      const quote = (selected || (line != null ? ctx.editor.getLine(line) : "")).trim();
+      return {
+        type: "text",
+        quote: quote.slice(0, 200),
+        ...(line !== undefined ? { line } : {}),
+      };
+    }
+    // 3b) Text in the reading view: prefer the live selection, else the block text.
     const sel = window.getSelection();
     const selected = sel && !sel.isCollapsed ? sel.toString().trim() : "";
     const block = target.closest("p, li, td, th, blockquote, h1, h2, h3, h4, h5, h6") as HTMLElement | null;
@@ -783,15 +831,17 @@ export default class ReviewMdPlugin extends Plugin {
       .getLeavesOfType("markdown")
       .map((l) => l.view)
       .find((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path);
-    const container =
-      (view?.contentEl.querySelector(".markdown-reading-view") as HTMLElement | null) ??
-      (view?.contentEl.querySelector(".markdown-preview-view") as HTMLElement | null);
+    // Pick the surface by the view's CURRENT mode, not by which element exists:
+    // a Live Preview view can still hold a stale, hidden `.markdown-preview-view`,
+    // so preferring it would search the wrong (empty) container. getMode() is
+    // "preview" for reading view, "source" for Live Preview / source (#24).
+    const inEditor = view?.getMode?.() === "source";
+    const container = inEditor
+      ? (view?.contentEl.querySelector(".cm-editor .cm-content") as HTMLElement | null)
+      : ((view?.contentEl.querySelector(".markdown-reading-view") as HTMLElement | null) ??
+        (view?.contentEl.querySelector(".markdown-preview-view") as HTMLElement | null));
     if (!container) {
-      new Notice(
-        view
-          ? "review-md: switch to reading view to locate the comment"
-          : "review-md: open the file to locate the comment",
-      );
+      new Notice("review-md: open the file to locate the comment");
       return;
     }
     const a = thread.anchor as {
@@ -820,6 +870,17 @@ export default class ReviewMdPlugin extends Plugin {
         return;
       }
     } else if (a.type === "text") {
+      // In Live Preview text renders as `.cm-line` (not <p>), so findBlockContaining
+      // can't locate it — use the durable block ref, which Obsidian scrolls to and
+      // flashes natively in the editor. Reading view keeps the quote-match + flash.
+      if (inEditor) {
+        if (a.blockId) {
+          this.app.workspace.openLinkText(`${file.path}#^${a.blockId}`, file.path, false);
+        } else {
+          new Notice("review-md: this text thread has no durable anchor to locate");
+        }
+        return;
+      }
       el = a.quote ? findBlockContaining(container, a.quote) : null;
       // Quote edited away / not found → fall back to the durable block ref, which
       // Obsidian re-tracks across edits. Native scroll, no flash (no element yet).

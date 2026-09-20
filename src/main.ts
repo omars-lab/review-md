@@ -1,4 +1,26 @@
 import { Plugin, Notice, TFile, normalizePath, MarkdownPostProcessorContext } from "obsidian";
+import xcallbackSchema from "./protocol/xcallback.schema.json";
+
+interface XcallbackParam {
+  name: string;
+  required: boolean;
+  type: string;
+  enum?: string[];
+  default?: string;
+  description: string;
+  example?: string;
+  // Required in the URL for Obsidian's own routing (e.g. `vault`), but Obsidian
+  // consumes it and never delivers it to the handler — so the plugin must NOT
+  // validate its presence. See docs/issues/xcallback-reserved-params.md.
+  reserved?: boolean;
+}
+interface XcallbackOperation {
+  id: string;
+  action: string;
+  summary: string;
+  description: string;
+  params: XcallbackParam[];
+}
 
 /**
  * review-md — scaffold entry point.
@@ -48,17 +70,27 @@ export default class ReviewMdPlugin extends Plugin {
   async onload(): Promise<void> {
     console.log("[review-md] loaded");
 
-    // obsidian://review-md?vault=V&file=path.md&thread=<id>[&action=reply&body=..&x-success=..&x-error=..]
-    this.registerObsidianProtocolHandler("review-md", async (params) => {
-      try {
-        await this.handleUri(params);
-        if (params["x-success"]) window.open(String(params["x-success"]));
-      } catch (err) {
-        console.error("[review-md] protocol error", err);
-        if (params["x-error"]) window.open(String(params["x-error"]));
-        else new Notice(`review-md: ${String(err)}`);
-      }
-    });
+    // One Obsidian action per operation: obsidian://review-md-open?..., review-md-reply?...
+    // We can't use a single handler with an `action`/`op` query selector because
+    // Obsidian *reserves* those: it overwrites `action` with the handler's own name
+    // and consumes `vault` for routing before the handler runs. So the operation is
+    // the action name itself. Actions + params live in src/protocol/xcallback.schema.json
+    // (the single source of truth docs/api/* is generated from).
+    // See docs/issues/xcallback-reserved-params.md.
+    for (const op of xcallbackSchema.operations as XcallbackOperation[]) {
+      this.registerObsidianProtocolHandler(op.action, async (params) => {
+        try {
+          this.validateParams(op, params);
+          if (op.id === "reply") await this.handleReply(params);
+          else await this.handleUri(op, params);
+          if (params["x-success"]) window.open(String(params["x-success"]));
+        } catch (err) {
+          console.error("[review-md] protocol error", err);
+          if (params["x-error"]) window.open(String(params["x-error"]));
+          else new Notice(`review-md: ${String(err)}`);
+        }
+      });
+    }
 
     this.addCommand({
       id: "poc4-seed-verify-frontmatter",
@@ -78,19 +110,75 @@ export default class ReviewMdPlugin extends Plugin {
       if (src === null) return;
       this.augmentRenderedMermaid(el, src, ctx.sourcePath);
     });
+
+    // Req 9 (bake): fold the injected comment nodes into the stored ```mermaid
+    // source on demand — the destructive opt-in. After baking, the live
+    // augmenter skips those threads (they're detected as already in-source), so
+    // there's no double injection. Idempotent: re-running skips baked threads.
+    this.addCommand({
+      id: "bake-mermaid-comments",
+      name: "Bake comments into diagram(s)",
+      callback: () => void this.bakeMermaidComments(),
+    });
   }
 
   onunload(): void {
     console.log("[review-md] unloaded");
   }
 
-  /** POC-1: resolve + open the target file, jump to a thread's ^blockId, and self-report. */
-  private async handleUri(params: Record<string, string>): Promise<void> {
-    const filePath = params.file;
-    if (!filePath) throw new Error("missing `file` param");
+  /** Validate params against the schema: required present, enums respected. */
+  private validateParams(op: XcallbackOperation, params: Record<string, string>): void {
+    // `reserved` params (e.g. `vault`) are consumed by Obsidian and never reach
+    // the handler, so we can't require their presence here.
+    const missing = op.params
+      .filter((p) => p.required && !p.reserved && !params[p.name])
+      .map((p) => p.name);
+    if (missing.length) {
+      throw new Error(`action \`${op.id}\` is missing required param(s): ${missing.join(", ")}`);
+    }
+    for (const p of op.params) {
+      const v = params[p.name];
+      if (v !== undefined && p.enum && !p.enum.includes(v)) {
+        throw new Error(`param \`${p.name}\` must be one of: ${p.enum.join(", ")} (got \`${v}\`)`);
+      }
+    }
+  }
 
+  /** Resolve a `file` param to a TFile or throw. */
+  private resolveFile(filePath: string | undefined): TFile {
+    if (!filePath) throw new Error("missing `file` param");
     const af = this.app.vault.getAbstractFileByPath(normalizePath(filePath));
     if (!(af instanceof TFile)) throw new Error(`file not found: ${filePath}`);
+    return af;
+  }
+
+  /** `reply` action: append a message to a thread in frontmatter, then open at it. */
+  private async handleReply(params: Record<string, string>): Promise<void> {
+    const file = this.resolveFile(params.file);
+    const threadId = params.thread;
+    const body = params.body;
+    const author = params.author || "external";
+
+    let found = false;
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      const threads = (fm.review?.threads as ReviewThread[] | undefined) ?? [];
+      const t = threads.find((x) => x.id === threadId);
+      if (t) {
+        t.messages.push({ author, ts: new Date().toISOString(), body });
+        found = true;
+      }
+    });
+    if (!found) throw new Error(`thread not found: ${threadId}`);
+
+    const leaf = this.app.workspace.getLeaf(false);
+    await leaf.openFile(file);
+    this.app.workspace.openLinkText(`${file.path}#^${threadId}`, file.path, false);
+    new Notice(`review-md: replied to ${threadId} in ${file.path}`);
+  }
+
+  /** POC-1: resolve + open the target file, jump to a thread's ^blockId, and self-report. */
+  private async handleUri(op: XcallbackOperation, params: Record<string, string>): Promise<void> {
+    const af = this.resolveFile(params.file);
 
     const leaf = this.app.workspace.getLeaf(false);
     await leaf.openFile(af);
@@ -102,7 +190,7 @@ export default class ReviewMdPlugin extends Plugin {
     const report =
       `# POC-1 report\n\n- **RESULT: PASS** — protocol handler fired and opened the file.\n` +
       `- opened: \`${af.path}\`\n- thread param: \`${params.thread ?? "(none)"}\`\n` +
-      `- action: \`${params.action ?? "open"}\`\n- x-success: \`${params["x-success"] ?? "(none)"}\`\n` +
+      `- action: \`${op.action}\`\n- x-success: \`${params["x-success"] ?? "(none)"}\`\n` +
       `- at: ${new Date().toISOString()}\n`;
     await this.writeVaultFile("POC-1-report.md", report);
     new Notice("review-md POC-1: opened " + af.path + " — see POC-1-report.md");
@@ -168,19 +256,28 @@ export default class ReviewMdPlugin extends Plugin {
     return lines.slice(1, -1).join("\n"); // strip the ``` fences
   }
 
+  /**
+   * Does thread `t` apply to a diagram with this source? True when it's a
+   * mermaidNode thread whose anchored node id appears in the source AND its
+   * comment node isn't already baked in (so a baked diagram doesn't get the
+   * node injected a second time by the live augmenter).
+   */
+  private mermaidThreadApplies(t: ReviewThread, source: string): boolean {
+    const a = t.anchor as { type?: string; node?: string };
+    return (
+      a?.type === "mermaidNode" &&
+      typeof a.node === "string" &&
+      new RegExp(`(^|[^\\w])${a.node}([^\\w]|$)`, "m").test(source) &&
+      !new RegExp(`\\brvw_${t.id}\\b`).test(source)
+    );
+  }
+
   /** mermaidNode threads whose anchored node id appears in *this* diagram. */
   private mermaidCommentsFor(source: string, sourcePath: string): ReviewThread[] {
     const fm = this.app.metadataCache.getCache(sourcePath)?.frontmatter as
       | { review?: { threads?: ReviewThread[] } }
       | undefined;
-    return (fm?.review?.threads ?? []).filter((t) => {
-      const a = t.anchor as { type?: string; node?: string };
-      return (
-        a?.type === "mermaidNode" &&
-        typeof a.node === "string" &&
-        new RegExp(`(^|[^\\w])${a.node}([^\\w]|$)`, "m").test(source)
-      );
-    });
+    return (fm?.review?.threads ?? []).filter((t) => this.mermaidThreadApplies(t, source));
   }
 
   /** Build `original source + one dashed comment node per thread` (source untouched). */
@@ -194,13 +291,83 @@ export default class ReviewMdPlugin extends Plugin {
       const label = `${escape(first)}<br/>💬 ${n} ${n === 1 ? "msg" : "msgs"}${t.resolved ? " ✓" : ""}`;
       return `  ${a.node} -. "💬" .-> ${cmtId(t)}(["${label}"])`;
     });
+    const needClassDef = !/classDef\s+reviewCmt\b/.test(source); // don't redefine on re-bake
     return (
       source.trimEnd() +
       "\n" +
       lines.join("\n") +
-      `\n  classDef reviewCmt fill:#fff3bf,stroke:#f0c000,color:#5c3d00,rx:6,ry:6` +
+      (needClassDef
+        ? `\n  classDef reviewCmt fill:#fff3bf,stroke:#f0c000,color:#5c3d00,rx:6,ry:6`
+        : "") +
       `\n  class ${comments.map(cmtId).join(",")} reviewCmt`
     );
+  }
+
+  /**
+   * Req 9 (bake command): write the injected comment nodes into every ```mermaid
+   * fence of the active file whose nodes carry threads. This is the destructive
+   * opt-in — it edits the stored source. Idempotent: threads already baked
+   * (their `rvw_<id>` node present) are skipped, so re-running is safe.
+   */
+  private async bakeMermaidComments(): Promise<void> {
+    const file = this.app.workspace.getActiveFile();
+    if (!file) {
+      new Notice("Bake: open a markdown file first");
+      return;
+    }
+    const fm = this.app.metadataCache.getCache(file.path)?.frontmatter as
+      | { review?: { threads?: ReviewThread[] } }
+      | undefined;
+    const threads = (fm?.review?.threads ?? []).filter(
+      (t) => (t.anchor as { type?: string }).type === "mermaidNode",
+    );
+    if (!threads.length) {
+      new Notice("Bake: no mermaidNode threads in this file");
+      return;
+    }
+
+    const lines = (await this.app.vault.read(file)).split("\n");
+    const out: string[] = [];
+    const fenceOpen = /^(\s*)(`{3,})\s*mermaid\s*$/;
+    let i = 0;
+    let bakedComments = 0;
+    let bakedDiagrams = 0;
+
+    while (i < lines.length) {
+      const open = lines[i].match(fenceOpen);
+      if (!open) {
+        out.push(lines[i]);
+        i++;
+        continue;
+      }
+      const [, indent, ticks] = open;
+      const closeRe = new RegExp(`^${indent}${ticks}\\s*$`);
+      let j = i + 1;
+      while (j < lines.length && !closeRe.test(lines[j])) j++;
+      const body = lines.slice(i + 1, j);
+      // De-indent the body to source, apply the same indent back afterwards.
+      const source = body.map((l) => (indent && l.startsWith(indent) ? l.slice(indent.length) : l)).join("\n");
+      const applicable = threads.filter((t) => this.mermaidThreadApplies(t, source));
+
+      if (applicable.length) {
+        const augmented = this.buildAugmentedSource(source, applicable);
+        out.push(lines[i]); // open fence
+        for (const l of augmented.split("\n")) out.push(indent ? indent + l : l);
+        if (j < lines.length) out.push(lines[j]); // close fence
+        bakedComments += applicable.length;
+        bakedDiagrams++;
+      } else {
+        for (let k = i; k <= Math.min(j, lines.length - 1); k++) out.push(lines[k]);
+      }
+      i = j + 1;
+    }
+
+    if (!bakedDiagrams) {
+      new Notice("Bake: nothing to bake (already baked, or no matching nodes)");
+      return;
+    }
+    await this.app.vault.modify(file, out.join("\n"));
+    new Notice(`Baked ${bakedComments} comment(s) into ${bakedDiagrams} diagram(s)`);
   }
 
   /**

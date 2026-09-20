@@ -1,5 +1,5 @@
 # review-md — one target per check; CI calls these same targets (local == CI parity).
-.PHONY: help install hooks build dev typecheck secrets secrets-all precommit check
+.PHONY: help install hooks build dev typecheck secrets secrets-all precommit check api-docs api-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -26,6 +26,12 @@ secrets: ## Scan STAGED changes for secrets (what the pre-commit hook runs)
 secrets-all: ## Scan the whole working tree for secrets
 	gitleaks dir . --redact --verbose
 
+api-docs: ## Regenerate docs/api/* from the x-callback schema
+	node scripts/gen-xcallback-api.mjs
+
+api-check: ## Fail if docs/api/* are stale vs the schema (what the pre-commit hook runs)
+	node scripts/gen-xcallback-api.mjs --check
+
 precommit: ## Run all pre-commit hooks against all files
 	pre-commit run --all-files
 
@@ -34,4 +40,4 @@ env-restore: ## Restore .env.keys from LastPass (requires `lpass login`)
 		"$$(lpass show 'dotenvx/review-md/DOTENV_PRIVATE_KEY' --password | tr -d '\r\n')" \
 		> .env.keys && chmod 600 .env.keys && echo "restored .env.keys from LastPass (chmod 600)"
 
-check: typecheck secrets-all ## Run the full local gate
+check: typecheck api-check secrets-all ## Run the full local gate

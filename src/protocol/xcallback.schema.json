@@ -1,0 +1,37 @@
+{
+  "$comment": "SINGLE SOURCE OF TRUTH for the review-md x-callback URL API. The plugin registers one Obsidian protocol handler per operations[].action and validates incoming URLs against this file (src/main.ts); scripts/gen-xcallback-api.mjs generates docs/api/* from it. Edit here, then run `make api-docs` (the pre-commit hook fails if the generated docs drift). NOTE: Obsidian reserves the `action` and `vault` query params (it overwrites `action` with the handler name and consumes `vault` for routing) — never define a param with either name. The operation is selected by the action name itself, not a query param. See docs/issues/xcallback-reserved-params.md.",
+  "name": "review-md x-callback URL API",
+  "version": "0.2.0",
+  "scheme": "obsidian",
+  "description": "Drive the review-md Obsidian plugin from other apps and agents via `obsidian://review-md-<operation>?...` URLs. Each operation is its own Obsidian action (URL endpoint) and follows the x-callback-url convention: pass `x-success`/`x-error` URLs to be opened when the operation finishes. Parameter values are URL-encoded strings. The `vault` parameter is required in the URL so Obsidian routes to the right vault window; the plugin itself resolves `file` against the active vault.",
+  "operations": [
+    {
+      "id": "open",
+      "action": "review-md-open",
+      "summary": "Open a file in the reviewer",
+      "description": "Open a markdown file in the review-md reviewer and, optionally, scroll to a specific comment thread.",
+      "params": [
+        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).", "example": ".dev-vault" },
+        { "name": "file", "required": true, "type": "string", "description": "Vault-relative path to the markdown file to open.", "example": "design.md" },
+        { "name": "thread", "required": false, "type": "string", "description": "Thread id (the file's `^blockId`) to scroll to after opening.", "example": "d1a2b3" },
+        { "name": "x-success", "required": false, "type": "string", "description": "URL opened when the operation succeeds (x-callback-url).", "example": "myapp://opened" },
+        { "name": "x-error", "required": false, "type": "string", "description": "URL opened when the operation fails (x-callback-url).", "example": "myapp://failed" }
+      ]
+    },
+    {
+      "id": "reply",
+      "action": "review-md-reply",
+      "summary": "Reply to a thread",
+      "description": "Append a message to an existing comment thread stored in the file's frontmatter, then open the file at that thread.",
+      "params": [
+        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).", "example": ".dev-vault" },
+        { "name": "file", "required": true, "type": "string", "description": "Vault-relative path to the markdown file that holds the thread.", "example": "design.md" },
+        { "name": "thread", "required": true, "type": "string", "description": "Id of the thread to reply to.", "example": "d1a2b3" },
+        { "name": "body", "required": true, "type": "string", "description": "The reply text. URL-encode newlines and special characters.", "example": "agreed — let's keep it in frontmatter" },
+        { "name": "author", "required": false, "type": "string", "default": "external", "description": "Author name recorded on the reply.", "example": "omar" },
+        { "name": "x-success", "required": false, "type": "string", "description": "URL opened when the reply is stored (x-callback-url).", "example": "myapp://replied" },
+        { "name": "x-error", "required": false, "type": "string", "description": "URL opened when the reply fails (x-callback-url).", "example": "myapp://failed" }
+      ]
+    }
+  ]
+}

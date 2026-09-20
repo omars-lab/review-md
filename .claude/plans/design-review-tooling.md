@@ -115,24 +115,33 @@ review:
 - **Agent contract:** `review-design` reads `review.threads[]` directly — stable keys, documented
   here. Unresolved threads with the anchor `quote` are its findings input.
 
-### x-callback URL scheme (requirements 1, 4, 5)
+### x-callback URL scheme (requirements 1, 4, 5) — **BUILT & PROVEN LIVE 2026-09-19**
 
-One custom action, `review-md`, registered via `registerObsidianProtocolHandler("review-md", …)`
-(or the app's own scheme in the standalone case). All params are strings.
+**One Obsidian action per operation** — NOT one action with an `action=`/`op=` selector.
+Obsidian *reserves* `action` (it overwrites it with the handler's own name) and `vault` (it
+consumes it for routing and strips it before the handler runs), so a selector param can never
+arrive. Each operation is registered as its own action via `registerObsidianProtocolHandler`.
+Full pivot trail: `docs/issues/xcallback-reserved-params.md`.
 
 | Purpose | URL |
 |---|---|
-| Open file | `obsidian://review-md?vault=V&uid=<fileUid>` (or `&file=<path>`) |
-| Open + focus thread (share link, req 4) | `obsidian://review-md?uid=<fileUid>&thread=<id>` |
-| Reply to a thread (req 5) | `obsidian://review-md?action=reply&uid=<fileUid>&thread=<id>&body=<text>&x-success=<url>&x-error=<url>` |
+| Open file (+ focus thread = share link, req 1/4) | `obsidian://review-md-open?vault=V&file=<path>&thread=<id>` |
+| Reply to a thread (req 5) | `obsidian://review-md-reply?vault=V&file=<path>&thread=<id>&body=<text>&author=<name>&x-success=<url>&x-error=<url>` |
 
-- Handler: resolve file by `uid` → open leaf → reveal comments view → scroll block `^thread` into
-  view + highlight → focus the thread panel. `reply` also appends `body` (or opens the composer
-  prefilled) and, on completion, `window.open`s `x-success` with result params (mirrors Advanced
-  URI's `success()`); errors call `x-error`.
-- **Native fallback** so links degrade without our logic: also emit
-  `obsidian://open?file=<path>%23%5E<thread>` which at least scrolls to the anchored block.
-- "Share thread" / "Copy reply link" are commands/buttons that build these URLs onto the clipboard.
+- **Single source of truth:** `src/protocol/xcallback.schema.json` defines the actions + params;
+  the plugin registers one handler per `operations[].action` and validates incoming params against
+  it. `vault` is marked `reserved` (required in the URL for routing, but Obsidian never delivers it,
+  so the plugin must not validate its presence — this was a real bug, see the issue doc).
+- **Generated API docs** (req: "swagger/openapi for folks"): `scripts/gen-xcallback-api.mjs` emits
+  `docs/api/xcallback.openapi.json` (OpenAPI 3.1), `docs/api/index.html` (Swagger UI) and
+  `docs/api/xcallback.md`. `make api-docs` writes them; `make api-check` + a `repo: local`
+  pre-commit hook fail on drift, so the docs can never fall out of sync with the schema.
+- Handler: resolve `file` in the active vault → open leaf → scroll block `^thread` into view.
+  `reply` appends `{author, ts, body}` to the thread in frontmatter via `processFrontMatter`, then
+  opens at the thread; on completion `window.open`s `x-success` (errors call `x-error`, else Notice).
+- **Reserved param rule:** never name a caller-facing param `action` or `vault`.
+- Both actions verified end-to-end via `open '<url>'` with raw-disk read-back (direct `eval` of the
+  handler is NOT a sufficient test — it skips the URL router + validation where the bugs lived).
 
 ### UI
 
@@ -200,12 +209,15 @@ real Obsidian config. What's verified:
    id minting; `review-design`-facing parse documented.
 3. **P2 — text threads:** reading-mode click → thread → sidebar list → reply → resolve; anchoring
    per POC-2 outcome.
-4. **P3 — URLs:** `review-md` open/focus/reply actions + `x-success`/`x-error`; share-thread and
-   copy-reply-link commands; native fallback links.
+4. **P3 — URLs:** ✅ **built 2026-09-19** — `review-md-open` / `review-md-reply` actions +
+   `x-success`/`x-error`, validated against `xcallback.schema.json`, with generated OpenAPI/Swagger
+   docs + drift hook. Still TODO: share-thread / copy-reply-link commands, native fallback links.
 5. **P4 — image + mermaid comments:** whole-image threads + has-threads badge per POC-3 (no
    coordinates); **Mermaid node comments per POC-6** (req 9) — click node → thread, augmented render
-   injecting comment nodes from frontmatter, overlay toggle, and a **"Bake comments into diagram"**
-   command that writes the merged diagram to a separate copy for external sharing.
+   injecting comment nodes from frontmatter. ✅ **"Bake comments into diagram" command built
+   2026-09-19** — folds the injected comment nodes into the file's own ```mermaid fences in place
+   (idempotent: skips already-baked threads; the live augmenter stands down on baked threads so
+   there's no double injection). Still TODO: overlay toggle.
 6. **P5 — agent loop:** wire `review-design` to read threads; round-trip smoke test; `review-setup`
    validation skill (PASS/FAIL checklist, scriptable vs GUI-only steps separated).
 
@@ -214,6 +226,10 @@ real Obsidian config. What's verified:
 - **Protocol handler:** `registerObsidianProtocolHandler(action, handler)`; handler gets one
   `ObsidianProtocolData` object = `action` + each query param **as a decoded string** (no arrays/
   nesting — pack structured data into one encoded param). Auto-unregistered on unload.
+  **Reserved params (learned the hard way, 2026-09-19):** Obsidian *overwrites* `action` with the
+  handler's own name and *strips* `vault` (consumed for routing) before calling the handler — so
+  neither can be used as a caller-facing param, and required-param validation must skip `vault`.
+  See `docs/issues/xcallback-reserved-params.md`.
 - **Native URI:** `obsidian://open?vault=&file=`; in-note target encoded into `file`
   (`%23Heading`, block `%23%5EblockId`). Advanced URI adds `x-success`/`x-error` by `window.open`ing
   the callback URL with result params, and resolves rename-stable links via a frontmatter `uid`.

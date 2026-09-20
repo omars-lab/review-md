@@ -216,6 +216,24 @@ export default class ReviewMdPlugin extends Plugin {
     // Capture-phase so we intercept the click before Obsidian follows links etc.
     this.registerDomEvent(document, "click", (evt) => this.handleCommentClick(evt), { capture: true });
 
+    // Copy-link commands (req 4) — command-palette equivalents of the sidebar
+    // card's Copy menu, acting on the sidebar's currently-focused thread.
+    this.addCommand({
+      id: "copy-share-link",
+      name: "Copy share link for the selected thread",
+      callback: () => void this.copyFocusedThreadLink("share"),
+    });
+    this.addCommand({
+      id: "copy-native-link",
+      name: "Copy native link for the selected thread",
+      callback: () => void this.copyFocusedThreadLink("native"),
+    });
+    this.addCommand({
+      id: "copy-reply-link",
+      name: "Copy reply-link template for the selected thread",
+      callback: () => void this.copyFocusedThreadLink("reply"),
+    });
+
     this.addCommand({
       id: "poc4-seed-verify-frontmatter",
       name: "POC-4 seed & verify frontmatter threads",
@@ -914,6 +932,39 @@ export default class ReviewMdPlugin extends Plugin {
       `obsidian://review-md-open?vault=${q(this.app.vault.getName())}` +
       `&file=${q(file.path)}&thread=${q(threadId)}`
     );
+  }
+
+  /**
+   * A `review-md-reply?...` URL **template** for a thread — `body` is required by
+   * the reply action, so it's left as a clearly-fillable `{{reply}}` placeholder
+   * for an app/agent (or a person editing the URL) to replace. Includes `author`.
+   */
+  buildReplyUrl(file: TFile, threadId: string, author = "external"): string {
+    const q = (s: string) => encodeURIComponent(s);
+    return (
+      `obsidian://review-md-reply?vault=${q(this.app.vault.getName())}` +
+      `&file=${q(file.path)}&thread=${q(threadId)}` +
+      `&author=${q(author)}&body=${q("{{reply}}")}`
+    );
+  }
+
+  /**
+   * A **native** Obsidian link to a thread's anchor that resolves without this
+   * plugin installed — a wikilink to the file, targeting the block ref when the
+   * thread has one (text threads always do, since durable anchoring). Falls back
+   * to a bare file wikilink for anchors with no block id (image/mermaid).
+   */
+  buildNativeLink(file: TFile, thread: ReviewThread): string {
+    const blockId = (thread.anchor as { blockId?: string }).blockId;
+    return blockId ? `[[${file.basename}#^${blockId}]]` : `[[${file.basename}]]`;
+  }
+
+  /** Copy a link for the comments sidebar's currently-focused thread, via a
+   *  command. No-op with a Notice when the sidebar is closed or nothing is focused. */
+  private async copyFocusedThreadLink(kind: "share" | "native" | "reply"): Promise<void> {
+    const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_COMMENTS)[0]?.view;
+    if (view instanceof CommentsView) await view.copyFocusedLink(kind);
+    else new Notice("review-md: open the comments sidebar and select a thread first");
   }
 
   /** POC-1: resolve + open the target file, jump to a thread's ^blockId, and self-report. */

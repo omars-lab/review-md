@@ -292,7 +292,11 @@ real Obsidian config. What's verified:
      deferred, task #24). Pruning of abandoned message-less threads ✅ (task #26).
 4. **P3 — URLs:** ✅ **built 2026-09-19** — `review-md-open` / `review-md-reply` actions +
    `x-success`/`x-error`, validated against `xcallback.schema.json`, with generated OpenAPI/Swagger
-   docs + drift hook. Still TODO: share-thread / copy-reply-link commands, native fallback links.
+   docs + drift hook. ✅ **completed 2026-09-20** — three commands on the focused thread
+   (Copy share link / Copy native link / Copy reply-link template) surfaced via the sidebar card's
+   copy-menu and the command palette; `buildNativeLink` emits `[[file#^blockId]]` (leans on #25's
+   durable block ids) so a shared link resolves even with the plugin disabled, and `buildReplyUrl`
+   emits a `review-md-reply` URL with a `{{reply}}` body placeholder (body is schema-required).
 5. **P4 — image + mermaid comments:** whole-image threads + has-threads badge per POC-3 (no
    coordinates); **Mermaid node comments per POC-6** (req 9) — click node → thread, augmented render
    injecting comment nodes from frontmatter. ✅ **"Bake comments into diagram" command built

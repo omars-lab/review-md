@@ -51,6 +51,10 @@
 .review-md-thread.is-resolved {
   opacity: 0.6;
 }
+.review-md-thread.is-focused {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
 .review-md-thread-top {
   display: flex;
   align-items: center;

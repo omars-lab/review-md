@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile, Notice, setIcon } from "obsidian";
+import { ItemView, WorkspaceLeaf, TFile, Notice, setIcon, Menu } from "obsidian";
 import type ReviewMdPlugin from "../main";
 import type { ReviewThread } from "../main";
 
@@ -21,6 +21,9 @@ export class CommentsView extends ItemView {
   private threads: ReviewThread[] = [];
   /** Current body hash of `file`, recomputed each render to flag stale threads. */
   private bodyHash: string | null = null;
+  /** The thread the user last selected (clicked/focused) — target of the
+   *  command-palette copy-link commands. */
+  private focusedThreadId: string | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: ReviewMdPlugin) {
     super(leaf);
@@ -80,10 +83,38 @@ export class CommentsView extends ItemView {
     await this.refresh();
     const card = this.contentEl.querySelector<HTMLElement>(`[data-thread-id="${threadId}"]`);
     if (!card) return;
+    this.setFocused(threadId);
     card.scrollIntoView({ behavior: "smooth", block: "center" });
     card.addClass("review-md-flash");
     window.setTimeout(() => card.removeClass("review-md-flash"), 1600);
     card.querySelector<HTMLTextAreaElement>(".review-md-reply-input")?.focus();
+  }
+
+  /** Mark a thread as the selected one (target of the copy-link commands). */
+  private setFocused(threadId: string): void {
+    this.focusedThreadId = threadId;
+    this.contentEl
+      .querySelectorAll(".review-md-thread.is-focused")
+      .forEach((c) => c.removeClass("is-focused"));
+    this.contentEl.querySelector(`[data-thread-id="${threadId}"]`)?.addClass("is-focused");
+  }
+
+  /** The currently-focused thread + its file, or null. Used by the copy-link
+   *  commands in the plugin. */
+  private focused(): { file: TFile; thread: ReviewThread } | null {
+    if (!this.file || !this.focusedThreadId) return null;
+    const thread = this.threads.find((t) => t.id === this.focusedThreadId);
+    return thread ? { file: this.file, thread } : null;
+  }
+
+  /** Copy a link for the focused thread (command entry point). */
+  async copyFocusedLink(kind: "share" | "native" | "reply"): Promise<void> {
+    const f = this.focused();
+    if (!f) {
+      new Notice("review-md: click a thread in the sidebar to select it first");
+      return;
+    }
+    await this.copyLink(f.thread, kind);
   }
 
   /** Rebuild the whole panel from the current file's threads. */
@@ -139,8 +170,10 @@ export class CommentsView extends ItemView {
     card.onclick = (e) => {
       const t = e.target as HTMLElement;
       if (t.closest("button, textarea, a")) return;
+      this.setFocused(thread.id);
       if (this.file) this.plugin.highlightAnchor(this.file, thread);
     };
+    if (thread.id === this.focusedThreadId) card.addClass("is-focused");
 
     const top = card.createDiv({ cls: "review-md-thread-top" });
     top.createEl("code", { cls: "review-md-tid", text: thread.id });
@@ -196,7 +229,11 @@ export class CommentsView extends ItemView {
     send.onclick = () => void this.sendReply(thread, ta);
 
     const share = labeledButton(actions, "link", "Copy");
-    share.onclick = () => void this.copyShareLink(thread);
+    share.setAttribute("aria-label", "Copy a link to this thread");
+    share.onclick = (e) => {
+      this.setFocused(thread.id);
+      this.showCopyMenu(e, thread);
+    };
 
     const toggle = thread.resolved
       ? labeledButton(actions, "rotate-ccw", "Reopen")
@@ -363,11 +400,44 @@ export class CommentsView extends ItemView {
     }
   }
 
-  private async copyShareLink(thread: ReviewThread): Promise<void> {
+  /** Dropdown of the three link kinds, anchored to the Copy button. */
+  private showCopyMenu(e: MouseEvent, thread: ReviewThread): void {
+    const menu = new Menu();
+    menu.addItem((i) =>
+      i.setTitle("Copy share link").setIcon("link").onClick(() => void this.copyLink(thread, "share")),
+    );
+    menu.addItem((i) =>
+      i
+        .setTitle("Copy native link (works without the plugin)")
+        .setIcon("file-symlink")
+        .onClick(() => void this.copyLink(thread, "native")),
+    );
+    menu.addItem((i) =>
+      i
+        .setTitle("Copy reply-link template")
+        .setIcon("reply")
+        .onClick(() => void this.copyLink(thread, "reply")),
+    );
+    menu.showAtMouseEvent(e);
+  }
+
+  /** Copy one of the three link kinds for a thread to the clipboard. */
+  private async copyLink(thread: ReviewThread, kind: "share" | "native" | "reply"): Promise<void> {
     if (!this.file) return;
-    const url = this.plugin.buildShareUrl(this.file, thread.id);
-    await navigator.clipboard.writeText(url);
-    new Notice("review-md: share link copied");
+    let text: string;
+    let label: string;
+    if (kind === "native") {
+      text = this.plugin.buildNativeLink(this.file, thread);
+      label = "native link";
+    } else if (kind === "reply") {
+      text = this.plugin.buildReplyUrl(this.file, thread.id, this.author);
+      label = "reply-link template (fill in {{reply}})";
+    } else {
+      text = this.plugin.buildShareUrl(this.file, thread.id);
+      label = "share link";
+    }
+    await navigator.clipboard.writeText(text);
+    new Notice(`review-md: ${label} copied`);
   }
 
   private async toggleResolved(thread: ReviewThread): Promise<void> {

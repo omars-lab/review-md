@@ -4,6 +4,7 @@ import {
   TFile,
   MarkdownView,
   Editor,
+  debounce,
   normalizePath,
   MarkdownPostProcessorContext,
   parseYaml,
@@ -94,6 +95,7 @@ const mkId = () => Math.random().toString(36).substring(2, 8);
  *  the rendered widgets (mermaid SVG, images) we query and flash. */
 interface CmEditorView {
   posAtCoords(coords: { x: number; y: number }): number | null;
+  posAtDOM(node: Node): number;
   contentDOM: HTMLElement;
 }
 function cmOf(editor: Editor): CmEditorView | null {
@@ -177,6 +179,14 @@ export default class ReviewMdPlugin extends Plugin {
   private commentMode = false;
   private commentRibbon: HTMLElement | null = null;
   settings: ReviewMdSettings = { ...DEFAULT_SETTINGS };
+  /** Live Preview mermaid augmenter state. Markdown post-processors never fire in
+   *  the CM6 editor (only in reading view / fully-rendered embeds), so the overlay
+   *  in Live Preview is driven by a MutationObserver on each editor's `.cm-content`
+   *  instead — see docs/issues/live-preview-mermaid-overlay.md. One observer per
+   *  view (dedup via the map); `lpAugmenting` guards a widget mid-render so a
+   *  mutation the augment itself causes doesn't re-enter. */
+  private lpObservers = new WeakMap<MarkdownView, MutationObserver>();
+  private lpAugmenting = new WeakSet<HTMLElement>();
 
   async onload(): Promise<void> {
     console.log("[review-md] loaded");
@@ -279,6 +289,20 @@ export default class ReviewMdPlugin extends Plugin {
       void this.augmentRenderedMermaid(el, src, ctx.sourcePath);
     });
 
+    // Live Preview parity (#24): the post-processor above never runs in the CM6
+    // editor, so LP mermaid diagrams would show none of the overlay. Drive it from
+    // a MutationObserver on the active editor's `.cm-content` instead — when CM6
+    // renders (or rebuilds) a mermaid widget we augment it, and a rebuild that
+    // strips our overlay simply fires the observer again. Re-attach on leaf/file
+    // changes since a new file may open into a source-mode leaf.
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", () => this.ensureLivePreviewAugmenter()),
+    );
+    this.registerEvent(
+      this.app.workspace.on("file-open", () => this.ensureLivePreviewAugmenter()),
+    );
+    this.app.workspace.onLayoutReady(() => this.ensureLivePreviewAugmenter());
+
     // Durable text anchoring (req: block-refs survive edits): stamp each rendered
     // section with its source line range so a click can locate the exact source
     // block to attach a native `^blockId` to. getSectionInfo is only available
@@ -318,16 +342,141 @@ export default class ReviewMdPlugin extends Plugin {
   private async toggleMermaidComments(): Promise<void> {
     this.settings.showMermaidComments = !this.settings.showMermaidComments;
     await this.saveData(this.settings);
-    this.app.workspace
+    const views = this.app.workspace
       .getLeavesOfType("markdown")
       .map((l) => l.view)
-      .filter((v): v is MarkdownView => v instanceof MarkdownView)
-      .forEach((v) => v.previewMode?.rerender(true));
+      .filter((v): v is MarkdownView => v instanceof MarkdownView);
+    for (const v of views) {
+      if (v.getMode?.() === "source") {
+        // Live Preview: the post-processor rerender below doesn't touch the editor
+        // surface, so apply/strip the CM6 overlay directly.
+        if (this.settings.showMermaidComments) void this.scanLivePreviewMermaid(v);
+        else void this.stripLivePreviewMermaid(v);
+      } else {
+        v.previewMode?.rerender(true);
+      }
+    }
     new Notice(
       this.settings.showMermaidComments
         ? "review-md: mermaid comment overlay shown"
         : "review-md: mermaid comment overlay hidden",
     );
+  }
+
+  /** Attach a debounced MutationObserver to the active source-mode editor's
+   *  `.cm-content` (once per view) so mermaid widgets get the comment overlay in
+   *  Live Preview, and re-scan an already-observed view. No-op in reading view
+   *  (the post-processor covers that) or when the overlay is toggled off. */
+  private ensureLivePreviewAugmenter(): void {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view || view.getMode?.() !== "source") return;
+    if (this.lpObservers.has(view)) {
+      void this.scanLivePreviewMermaid(view);
+      return;
+    }
+    const cm = cmOf(view.editor);
+    if (!cm) return;
+    const scan = debounce(() => void this.scanLivePreviewMermaid(view), 120, false);
+    const obs = new MutationObserver(scan);
+    obs.observe(cm.contentDOM, { childList: true, subtree: true });
+    this.lpObservers.set(view, obs);
+    this.register(() => obs.disconnect());
+    void this.scanLivePreviewMermaid(view);
+  }
+
+  /** The ```mermaid source of a Live Preview widget: map the widget back to its
+   *  source offset (`posAtDOM`), then read the fence body straight from the live
+   *  editor buffer (not the vault file — the buffer reflects unsaved edits). */
+  private livePreviewMermaidSource(cm: CmEditorView, editor: Editor, widget: HTMLElement): string | null {
+    let pos: number;
+    try {
+      pos = cm.posAtDOM(widget);
+    } catch {
+      return null;
+    }
+    if (pos == null) return null;
+    const total = editor.lineCount();
+    const startLine = editor.offsetToPos(pos).line;
+    const fenceOpen = /^\s*`{3,}\s*mermaid\s*$/;
+    const fenceClose = /^\s*`{3,}\s*$/;
+    // posAtDOM lands on (or just before) the fence line; scan a small window so a
+    // stray offset can't skip forward into the *next* diagram.
+    let open = startLine;
+    const limit = Math.min(total, startLine + 4);
+    while (open < limit && !fenceOpen.test(editor.getLine(open))) open++;
+    if (open >= limit || !fenceOpen.test(editor.getLine(open))) return null;
+    let close = open + 1;
+    while (close < total && !fenceClose.test(editor.getLine(close))) close++;
+    const body: string[] = [];
+    for (let l = open + 1; l < close; l++) body.push(editor.getLine(l));
+    return body.join("\n");
+  }
+
+  /** Find each rendered mermaid widget in a Live Preview editor and augment any
+   *  that carry threads and aren't already fully overlaid. Self-heals: when CM6
+   *  rebuilds a widget (stripping our overlay) the observer re-fires and this runs
+   *  again. `lpAugmenting` prevents the async augment from re-entering itself. */
+  private async scanLivePreviewMermaid(view: MarkdownView): Promise<void> {
+    if (!this.settings.showMermaidComments) return;
+    if (view.getMode?.() !== "source") return;
+    const cm = cmOf(view.editor);
+    const file = view.file;
+    if (!cm || !file) return;
+    const widgets = Array.from(
+      cm.contentDOM.querySelectorAll<HTMLElement>(".cm-embed-block.cm-lang-mermaid"),
+    );
+    for (const widget of widgets) {
+      if (this.lpAugmenting.has(widget)) continue;
+      const host = widget.querySelector<HTMLElement>(".mermaid") ?? widget;
+      if (!host.querySelector("svg")) continue; // not rendered yet — a later mutation retries
+      const source = this.livePreviewMermaidSource(cm, view.editor, widget);
+      if (source == null) continue;
+      const nodeComments = await this.mermaidCommentsFor(source, file.path);
+      const edgeComments = await this.mermaidEdgeCommentsFor(source, file.path);
+      if (!nodeComments.length && !edgeComments.length) continue;
+      // Already fully overlaid? (node overlay = our re-rendered svg; edge overlay =
+      // a badge per applicable thread). Skip so we don't loop on our own mutations.
+      const nodeDone = !nodeComments.length || !!host.querySelector(".review-md-mermaid svg");
+      const edgeDone = edgeComments.every(
+        (t) => !!host.querySelector(`.review-md-edge-badge[data-thread="${t.id}"]`),
+      );
+      if (nodeDone && edgeDone) continue;
+      this.lpAugmenting.add(widget);
+      try {
+        await this.augmentRenderedMermaid(host, source, file.path);
+      } finally {
+        this.lpAugmenting.delete(widget);
+      }
+    }
+  }
+
+  /** Revert Live Preview mermaid widgets to their native render (overlay toggled
+   *  off): drop edge badges, and re-render the original source over any widget we
+   *  replaced with an augmented svg. */
+  private async stripLivePreviewMermaid(view: MarkdownView): Promise<void> {
+    const cm = cmOf(view.editor);
+    const file = view.file;
+    if (!cm || !file) return;
+    const mermaid = (window as unknown as { mermaid?: any }).mermaid;
+    const widgets = Array.from(
+      cm.contentDOM.querySelectorAll<HTMLElement>(".cm-embed-block.cm-lang-mermaid"),
+    );
+    for (const widget of widgets) {
+      widget.querySelectorAll(".review-md-edge-badge").forEach((b) => b.remove());
+      const aug = widget.querySelector<HTMLElement>(".review-md-mermaid");
+      if (!aug) continue;
+      const inner = widget.querySelector<HTMLElement>(".mermaid") ?? widget;
+      const source = this.livePreviewMermaidSource(cm, view.editor, widget);
+      if (!source || !mermaid?.render) continue;
+      try {
+        const { svg, bindFunctions } = await mermaid.render("reviewmd-native-" + mkId(), source);
+        inner.empty();
+        inner.innerHTML = svg;
+        bindFunctions?.(inner);
+      } catch (err) {
+        console.error("[review-md] LP mermaid revert failed", err);
+      }
+    }
   }
 
   onunload(): void {

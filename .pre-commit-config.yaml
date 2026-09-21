@@ -3,7 +3,7 @@
 # (gitleaks, dotenvx) — no network fetch, and identical to the `make` targets
 # CI runs (local == CI parity, per CLAUDE.md).
 #
-# Install:  make hooks   (or: pre-commit install)
+# Install:  make hooks   (installs both the pre-commit and post-commit hook types)
 repos:
   - repo: local
     hooks:
@@ -25,3 +25,16 @@ repos:
         language: system
         pass_filenames: false
         files: '^(src/protocol/xcallback\.schema\.json|scripts/gen-xcallback-api\.mjs|docs/api/)'
+
+      # post-commit stage: after a commit lands, re-anchor any working-copy comment
+      # threads whose reviewed file was just committed (WORKING_REV → real commit).
+      # The reviewed file is committed in the CLI, not Obsidian, so this runs here
+      # rather than in the plugin. See docs/issues/reanchor-hook.md.
+      - id: reanchor-working-comments
+        name: re-anchor working-copy comment threads to their commit
+        entry: node scripts/reanchor-comments.mjs
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [post-commit]
+        verbose: true

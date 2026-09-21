@@ -96,14 +96,19 @@ export class CommentsView extends ItemView {
   private syncActiveFile(): void {
     const active = this.app.workspace.getActiveFile();
     const next = active && active.extension === "md" ? active : this.file;
-    if (next !== this.file) {
-      // Leaving a file abandons any thread there we never gave a first comment.
-      const prev = this.file;
-      this.file = next;
-      // A revision is meaningful only within its file — reset the filter on switch.
-      this.revisionFilter = null;
-      if (prev && prev !== next) void this.plugin.pruneEmptyThreads(prev);
-    }
+    // Same file already shown: the panel is current, so do NOT re-render. This
+    // fires on every active-leaf-change (e.g. clicking into the editor), and a
+    // full rebuild here would blow away transient card DOM — an expanded
+    // "Content Revisions" accordion, an in-progress reply/edit, an armed delete.
+    // On-disk body edits to this file are caught by the metadataCache "changed"
+    // listener instead, so drift is still repainted when it actually happens.
+    if (this.file && next === this.file) return;
+    // Leaving a file abandons any thread there we never gave a first comment.
+    const prev = this.file;
+    this.file = next;
+    // A revision is meaningful only within its file — reset the filter on switch.
+    this.revisionFilter = null;
+    if (prev && prev !== next) void this.plugin.pruneEmptyThreads(prev);
     void this.refresh();
   }
 

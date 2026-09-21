@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice, setIcon, Menu } from "obsidian";
 import type ReviewMdPlugin from "../main";
+import { WORKING_REV } from "../main";
 import type { ReviewThread } from "../main";
 
 export const VIEW_TYPE_COMMENTS = "review-md-comments";
@@ -135,17 +136,21 @@ export class CommentsView extends ItemView {
     void this.plugin.bodyHashFor(file).then((h) => {
       if (this.file === file) {
         this.bodyHash = h;
-        this.markStaleThreads();
+        this.fillVersionRows();
       }
     });
 
     const header = root.createDiv({ cls: "review-md-header" });
     header.createEl("h3", { text: this.file.basename });
     const threads = this.threads;
-    header.createEl("span", {
-      cls: "review-md-count",
-      text: threads.length === 1 ? "1 thread" : `${threads.length} threads`,
-    });
+    // Break the count down by status ("4 open, 1 resolved") rather than a bare
+    // total — the open figure is what a reviewer acts on.
+    const resolved = threads.filter((t) => t.resolved).length;
+    const open = threads.length - resolved;
+    const parts: string[] = [];
+    if (open || !resolved) parts.push(`${open} open`);
+    if (resolved) parts.push(`${resolved} resolved`);
+    header.createEl("span", { cls: "review-md-count", text: parts.join(", ") });
 
     if (threads.length === 0) {
       root.createEl("p", {
@@ -177,15 +182,32 @@ export class CommentsView extends ItemView {
 
     const top = card.createDiv({ cls: "review-md-thread-top" });
     top.createEl("code", { cls: "review-md-tid", text: thread.id });
+    // A compact content-type badge (node / edge / text / image / header) rather
+    // than a verbose anchor line — the preview right below already shows *which*
+    // node/passage this is, so the header only needs to say *what kind*. The full
+    // description stays as the tooltip.
     top.createEl("span", {
-      cls: "review-md-anchor",
-      text: describeAnchor(thread.anchor),
-      attr: { title: "Click the card to locate this comment in the document" },
+      cls: "review-md-type-badge",
+      text: anchorTypeLabel(thread.anchor),
+      attr: { "data-type": anchorTypeLabel(thread.anchor), title: describeAnchor(thread.anchor) },
     });
     if (thread.resolved) top.createEl("span", { cls: "review-md-resolved-tag", text: "resolved" });
 
-    // Version-staleness row — filled by markStaleThreads() once the current body
-    // hash is known, and only when this thread's reviewed version has changed.
+    // Share — a top-right icon (moved out of the action row); opens the link-kind
+    // menu (share / native / reply). margin-left:auto floats it to the right edge.
+    const share = top.createEl("button", {
+      cls: "review-md-share clickable-icon",
+      attr: { "aria-label": "Share this thread" },
+    });
+    setIcon(share, "share-2");
+    share.onclick = (e) => {
+      this.setFocused(thread.id);
+      this.showCopyMenu(e, thread);
+    };
+
+    // Version row — filled by fillVersionRows() once the current body hash is
+    // known: always the commit/version this comment was authored on, plus an
+    // "outdated" warning when the reviewed body has since changed.
     card.createDiv({ cls: "review-md-rev" });
 
     // Show what the comment is anchored to, inline in the card: a mini render of
@@ -225,15 +247,8 @@ export class CommentsView extends ItemView {
     });
     const actions = replyBox.createDiv({ cls: "review-md-actions" });
 
-    const send = labeledButton(actions, "send", "Send", "mod-cta");
+    const send = labeledButton(actions, "send", "Post", "mod-cta");
     send.onclick = () => void this.sendReply(thread, ta);
-
-    const share = labeledButton(actions, "link", "Copy");
-    share.setAttribute("aria-label", "Copy a link to this thread");
-    share.onclick = (e) => {
-      this.setFocused(thread.id);
-      this.showCopyMenu(e, thread);
-    };
 
     const toggle = thread.resolved
       ? labeledButton(actions, "rotate-ccw", "Reopen")
@@ -293,12 +308,13 @@ export class CommentsView extends ItemView {
   }
 
   /**
-   * Fill each card's `.review-md-rev` slot with an "outdated" badge when the
-   * thread's stored `rev.bodyHash` no longer matches the file's current body.
-   * Runs after render() resolves the current hash; leaves fresh threads quiet.
+   * Fill each card's `.review-md-rev` slot with the version the comment was
+   * authored on — always, so a reader can see which commit/version of the
+   * artifact a comment belongs to — plus an "outdated" warning when the reviewed
+   * body has changed since. Runs after render() resolves the current body hash.
    */
-  private markStaleThreads(): void {
-    if (!this.file || !this.bodyHash) return;
+  private fillVersionRows(): void {
+    if (!this.file) return;
     const byId = new Map(this.threads.map((t) => [t.id, t]));
     this.contentEl.querySelectorAll<HTMLElement>(".review-md-thread").forEach((card) => {
       const id = card.dataset.threadId;
@@ -308,13 +324,29 @@ export class CommentsView extends ItemView {
       slot.empty();
       slot.removeClass("is-visible");
       const rev = thread.rev;
-      if (!rev?.bodyHash || rev.bodyHash === this.bodyHash) return; // no stamp, or unchanged
+      if (!rev?.bodyHash) return; // seeded fixtures with no stamp stay quiet
       slot.addClass("is-visible");
-      const badge = slot.createSpan({ cls: "review-md-outdated" });
-      setIcon(badge, "alert-triangle");
-      badge.createSpan({ text: "outdated" });
-      const base = rev.git?.commit ?? rev.bodyHash.slice(0, 7);
-      slot.createSpan({ cls: "review-md-rev-base", text: `commented on ${base}` });
+
+      // Always: which version this comment was made against. A commit sha when the
+      // file was git-tracked at authoring time, "working copy" for a comment left
+      // on uncommitted state, else the body-hash slug.
+      const working = rev.git?.commit === WORKING_REV;
+      const version = working ? "working copy" : (rev.git?.commit ?? rev.bodyHash.slice(0, 7));
+      const stamp = slot.createSpan({ cls: "review-md-rev-base" });
+      setIcon(stamp.createSpan({ cls: "review-md-rev-icon" }), working ? "git-branch" : "git-commit");
+      stamp.createSpan({ text: ` on ${version}` });
+      stamp.title = working
+        ? "Comment made on the uncommitted working copy; re-anchors to a commit when the file is committed"
+        : `Comment made on version ${version}`;
+
+      // Only when the reviewed body has since diverged: an outdated warning.
+      if (this.bodyHash != null && rev.bodyHash !== this.bodyHash) {
+        const badge = slot.createSpan({ cls: "review-md-outdated" });
+        setIcon(badge, "alert-triangle");
+        badge.createSpan({ text: "outdated" });
+      }
+
+      // The affordance to view the exact version this comment was made against.
       const show = labeledButton(slot, "history", "Show reviewed version", "review-md-show-rev");
       show.onclick = () => void this.showReviewedVersion(thread, card);
     });
@@ -400,7 +432,7 @@ export class CommentsView extends ItemView {
     }
   }
 
-  /** Dropdown of the three link kinds, anchored to the Copy button. */
+  /** Dropdown of the three link kinds, anchored to the card's share icon. */
   private showCopyMenu(e: MouseEvent, thread: ReviewThread): void {
     const menu = new Menu();
     menu.addItem((i) =>
@@ -480,6 +512,24 @@ function snippetAround(body: string, quote: string, radius = 240): string {
   const start = Math.max(0, at - radius);
   const end = Math.min(body.length, at + q.length + radius);
   return `${start > 0 ? "…" : ""}${body.slice(start, end).trim()}${end < body.length ? "…" : ""}`;
+}
+
+/** Short content-type label for the card's type badge. */
+function anchorTypeLabel(anchor: Record<string, unknown>): string {
+  switch (String(anchor?.type ?? "unknown")) {
+    case "mermaidNode":
+      return "node";
+    case "mermaidEdge":
+      return "edge";
+    case "text":
+      return "text";
+    case "image":
+      return "image";
+    case "header":
+      return "header";
+    default:
+      return String(anchor?.type ?? "unknown");
+  }
 }
 
 /** Human-readable one-liner for a thread's anchor. */

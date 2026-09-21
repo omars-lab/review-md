@@ -73,6 +73,13 @@ export interface ReviewRev {
   ts: string;
   git?: { commit: string; blob: string };
 }
+/**
+ * Sentinel `rev.git.commit` for a comment left on the *uncommitted working copy*
+ * of a file (its body differs from the committed blob at authoring time). A
+ * post-commit hook re-anchors such threads to the real commit sha once the file
+ * is committed. See docs/issues/version-stamping.md.
+ */
+export const WORKING_REV = "working";
 export interface ReviewThread {
   id: string;
   anchor: Record<string, unknown>;
@@ -917,7 +924,12 @@ export default class ReviewMdPlugin extends Plugin {
   async gitRevFor(file: TFile): Promise<{ commit: string; blob: string } | null> {
     const ctx = await this.gitContext(file);
     if (!ctx) return null;
-    const commit = await ctx.run(["rev-parse", "--short", "HEAD"]);
+    // The version is the last commit that actually TOUCHED this file, not HEAD —
+    // unrelated commits don't produce a new version of the reviewed doc (Omar,
+    // 2026-09-21). `rev-list -1 HEAD -- <path>` is that commit; the blob at that
+    // commit equals HEAD's blob (nothing changed the file since), so retrieval
+    // via `git show <commit>:<path>` stays consistent.
+    const commit = await ctx.run(["rev-list", "-1", "--abbrev-commit", "HEAD", "--", ctx.rel]);
     const blob = await ctx.run(["rev-parse", `HEAD:${ctx.rel}`]);
     if (!commit || !blob) return null; // untracked / no commits → git-agnostic path
     return { commit, blob };

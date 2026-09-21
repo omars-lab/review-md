@@ -441,14 +441,23 @@ export default class ReviewMdPlugin extends Plugin {
       const nodeComments = await this.mermaidCommentsFor(source, file.path);
       const edgeComments = await this.mermaidEdgeCommentsFor(source, file.path);
       if (!nodeComments.length && !edgeComments.length) continue;
-      // Already fully overlaid? Both node and edge overlays leave a badge per
-      // applicable thread, so a badge each means done. Skip so we don't loop on our
-      // own mutations. (When CM6 rebuilds the widget the badges are gone → re-apply.)
-      const nodeDone = nodeComments.every(
-        (t) => !!host.querySelector(`.review-md-node-badge[data-thread="${t.id}"]`),
+      // Already fully overlaid? Nodes get one badge per node (keyed data-node),
+      // edges one per thread. A badge for each means done — skip so we don't loop on
+      // our own mutations. (When CM6 rebuilds the widget the badges are gone → re-apply.)
+      const nodeIds = new Set(
+        nodeComments.map((t) => (t.anchor as { node?: string }).node).filter(Boolean),
       );
-      const edgeDone = edgeComments.every(
-        (t) => !!host.querySelector(`.review-md-edge-badge[data-thread="${t.id}"]`),
+      const nodeDone = [...nodeIds].every(
+        (n) => !!host.querySelector(`.review-md-node-badge[data-node="${n}"]`),
+      );
+      const edgeKeys = new Set(
+        edgeComments.map((t) => {
+          const a = t.anchor as { from?: string; to?: string; index?: number };
+          return a.from && a.to ? `${a.from}-${a.to}-${a.index ?? 0}` : null;
+        }).filter(Boolean),
+      );
+      const edgeDone = [...edgeKeys].every(
+        (k) => !!host.querySelector(`.review-md-edge-badge[data-edge="${k}"]`),
       );
       if (nodeDone && edgeDone) continue;
       this.lpAugmenting.add(widget);
@@ -1477,38 +1486,49 @@ export default class ReviewMdPlugin extends Plugin {
     const svg = host.querySelector("svg");
     if (!svg) return;
     const ns = "http://www.w3.org/2000/svg";
+    // One badge per NODE, counting unique threads (not replies) — a node can carry
+    // several distinct discussions, so group by the node the anchor points at.
+    const byNode = new Map<string, ReviewThread[]>();
     for (const t of comments) {
-      const a = t.anchor as { node?: string };
-      if (!a.node) continue;
+      const node = (t.anchor as { node?: string }).node;
+      if (!node) continue;
+      const list = byNode.get(node);
+      if (list) list.push(t);
+      else byNode.set(node, [t]);
+    }
+    for (const [node, threads] of byNode) {
       const g = svg.querySelector(
-        `g.node[id*="-${a.node}-"], g.node[id$="-${a.node}"]`,
+        `g.node[id*="-${node}-"], g.node[id$="-${node}"]`,
       ) as SVGGElement | null;
       if (!g) continue;
-      // Open → recolour the built-in shape; resolved → revert to native colour.
-      g.classList.toggle("review-md-commented", !t.resolved);
-      // Badge (idempotent): skip if this thread's badge is already on the node.
-      if (g.querySelector(`.review-md-node-badge[data-thread="${t.id}"]`)) continue;
-      let bbox: DOMRect;
-      try {
-        bbox = (g as unknown as SVGGraphicsElement).getBBox();
-      } catch {
-        continue; // not measurable yet
-      }
+      const open = threads.filter((t) => !t.resolved);
+      // Any open thread → recolour the built-in shape; all resolved → native colour.
+      g.classList.toggle("review-md-commented", open.length > 0);
+      // Rebuild the badge each apply so its count stays in sync with the thread set
+      // (augment runs once per render, so this doesn't churn).
+      g.querySelector(":scope > .review-md-node-badge")?.remove();
+      const allResolved = open.length === 0;
       const badge = document.createElementNS(ns, "g");
-      badge.setAttribute("class", "review-md-node-badge" + (t.resolved ? " is-resolved" : ""));
-      // Top-right corner of the node, in the node group's local coordinates.
-      badge.setAttribute("transform", `translate(${bbox.x + bbox.width}, ${bbox.y})`);
-      (badge as unknown as HTMLElement).dataset.thread = t.id;
+      badge.setAttribute("class", "review-md-node-badge" + (allResolved ? " is-resolved" : ""));
+      // Top-right corner, read from the shape's static attributes so it lands
+      // correctly even when the reading-view section is display:none (getBBox
+      // reads 0 then and would pin the badge to the node's centre).
+      const pos = nodeShapeTopRight(g);
+      badge.setAttribute("transform", `translate(${pos.x}, ${pos.y})`);
+      (badge as unknown as HTMLElement).dataset.node = node;
       badge.style.cursor = "pointer";
       const circle = document.createElementNS(ns, "circle");
       circle.setAttribute("r", "11");
       const text = document.createElementNS(ns, "text");
       text.setAttribute("text-anchor", "middle");
       text.setAttribute("dominant-baseline", "central");
-      const n = t.messages.length;
-      text.textContent = t.resolved ? "✓" : n > 1 ? String(n) : "💬";
+      // The number is the count of open threads; 💬 for a single one, ✓ when the
+      // node's threads are all resolved.
+      const n = open.length;
+      text.textContent = allResolved ? "✓" : n > 1 ? String(n) : "💬";
       const title = document.createElementNS(ns, "title");
-      title.textContent = `${a.node}: ${n} message${n === 1 ? "" : "s"}${t.resolved ? " (resolved)" : ""}`;
+      const total = threads.length;
+      title.textContent = `${node}: ${total} thread${total === 1 ? "" : "s"}${allResolved ? " (resolved)" : ""}`;
       badge.append(title, circle, text);
       g.appendChild(badge);
     }
@@ -1524,33 +1544,47 @@ export default class ReviewMdPlugin extends Plugin {
     const svg = host.querySelector("svg");
     if (!svg) return;
     const ns = "http://www.w3.org/2000/svg";
+    // One badge per EDGE, counting unique threads (not replies) — group by the
+    // edge the anchor points at (from → to, disambiguated by index).
+    const byEdge = new Map<string, { from: string; to: string; index: number; threads: ReviewThread[] }>();
     for (const t of edgeComments) {
       const a = t.anchor as { from?: string; to?: string; index?: number };
       if (!a.from || !a.to) continue;
-      const path = findEdgePath(svg, a.from, a.to, a.index ?? 0);
+      const index = a.index ?? 0;
+      const key = `${a.from}\u0000${a.to}\u0000${index}`;
+      const grp = byEdge.get(key);
+      if (grp) grp.threads.push(t);
+      else byEdge.set(key, { from: a.from, to: a.to, index, threads: [t] });
+    }
+    for (const { from, to, index, threads } of byEdge.values()) {
+      const path = findEdgePath(svg, from, to, index);
       if (!path || !path.parentNode) continue;
-      // Skip if this badge is already present (re-render/retry safety).
-      if (svg.querySelector(`.review-md-edge-badge[data-thread="${t.id}"]`)) continue;
       let mid: DOMPoint;
       try {
         mid = path.getPointAtLength(path.getTotalLength() / 2);
       } catch {
         continue; // path not measurable yet
       }
+      const edgeKey = `${from}-${to}-${index}`;
+      // Rebuild the badge each apply so its count stays in sync with the thread set.
+      svg.querySelector(`.review-md-edge-badge[data-edge="${edgeKey}"]`)?.remove();
+      const open = threads.filter((t) => !t.resolved);
+      const allResolved = open.length === 0;
       const g = document.createElementNS(ns, "g");
-      g.setAttribute("class", "review-md-edge-badge" + (t.resolved ? " is-resolved" : ""));
+      g.setAttribute("class", "review-md-edge-badge" + (allResolved ? " is-resolved" : ""));
       g.setAttribute("transform", `translate(${mid.x}, ${mid.y})`);
-      (g as unknown as HTMLElement).dataset.thread = t.id;
+      (g as unknown as HTMLElement).dataset.edge = edgeKey;
       g.style.cursor = "pointer";
       const circle = document.createElementNS(ns, "circle");
       circle.setAttribute("r", "11");
       const text = document.createElementNS(ns, "text");
       text.setAttribute("text-anchor", "middle");
       text.setAttribute("dominant-baseline", "central");
-      const n = t.messages.length;
-      text.textContent = t.resolved ? "✓" : n > 1 ? String(n) : "💬";
+      const n = open.length;
+      text.textContent = allResolved ? "✓" : n > 1 ? String(n) : "💬";
       const title = document.createElementNS(ns, "title");
-      title.textContent = `${a.from} → ${a.to}: ${n} message${n === 1 ? "" : "s"}${t.resolved ? " (resolved)" : ""}`;
+      const total = threads.length;
+      title.textContent = `${from} → ${to}: ${total} thread${total === 1 ? "" : "s"}${allResolved ? " (resolved)" : ""}`;
       g.append(title, circle, text);
       path.parentNode.appendChild(g);
     }
@@ -1683,6 +1717,30 @@ function findEdgePath(
   // Fall back: same endpoints, any index (diagram may have been edited).
   const anyIdx = new RegExp(`^L[-_]${escapeRegExp(from)}[-_]${escapeRegExp(to)}[-_]\\d+$`);
   return paths.find((p) => anyIdx.test(p.id)) ?? null;
+}
+
+/**
+ * The top-right corner of a mermaid node, in the node group's local coordinates.
+ * Read from the shape's static `x`/`y`/`width` attributes rather than `getBBox()`:
+ * a reading-view section can be `display:none` when the badge is injected (no
+ * retry after that), and `getBBox` reads 0 there — which would pin the badge to
+ * the node's centre. Falls back to a (tolerated-zero) measure for non-rect shapes.
+ */
+function nodeShapeTopRight(g: SVGGElement): { x: number; y: number } {
+  const rect = g.querySelector("rect");
+  if (rect) {
+    const x = parseFloat(rect.getAttribute("x") ?? "");
+    const y = parseFloat(rect.getAttribute("y") ?? "");
+    const w = parseFloat(rect.getAttribute("width") ?? "");
+    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(w)) return { x: x + w, y };
+  }
+  try {
+    const b = (g as unknown as SVGGraphicsElement).getBBox();
+    if (b.width > 0) return { x: b.x + b.width, y: b.y };
+  } catch {
+    /* not measurable yet */
+  }
+  return { x: 0, y: 0 };
 }
 
 /** A one-word label for an anchor, for notices. */

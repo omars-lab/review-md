@@ -13,6 +13,12 @@ paths = [
   '''^\.env$''',
   # Generated bundle.
   '''^main\.js$''',
+  # .env.keys holds the real dotenvx private key. It is git-ignored (can never be
+  # staged/committed) and the commit path is already guarded by the dedicated
+  # `dotenvx ext precommit` hook, so gitleaks needn't re-guard it — this allowlist
+  # only silences the whole-tree `gitleaks dir` scan (make secrets-all / make check),
+  # which reads on-disk files regardless of .gitignore. Restore it with `make env-restore`.
+  '''^\.env\.keys$''',
 ]
 # dotenvx encrypts values as `encrypted:BASE64...`; never flag those.
 regexes = [

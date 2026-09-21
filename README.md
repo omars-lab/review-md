@@ -161,7 +161,8 @@ nvm use
 npm install
 npm run dev        # esbuild watch → main.js
 npm run install:dev  # set up / refresh the .dev-vault harness
-make check         # the full local gate (typecheck · api-check · validate · secrets)
+make test          # unit tests for the pure logic (node --test, no deps)
+make check         # the full local gate (typecheck · test · api-check · validate · secrets)
 make hooks         # install the pre-commit + post-commit git hooks
 ```
 

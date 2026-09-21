@@ -1,5 +1,5 @@
 # review-md — one target per check; local hooks call these same targets (no CI service).
-.PHONY: help install hooks build dev typecheck secrets secrets-all precommit check api-docs api-check reanchor validate validate-fix install-vault version release release-check
+.PHONY: help install hooks build dev typecheck test secrets secrets-all precommit check api-docs api-check reanchor validate validate-fix install-vault version release release-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -20,6 +20,9 @@ dev: ## Watch-build the plugin bundle
 
 typecheck: ## Type-check only
 	npm run typecheck
+
+test: ## Run the pure-logic unit tests (Node strips .ts natively; needs Node >=22.6)
+	node --test "test/**/*.test.ts"
 
 secrets: ## Scan STAGED changes for secrets (what the pre-commit hook runs)
 	gitleaks git --pre-commit --staged --redact --verbose
@@ -62,4 +65,4 @@ release: build ## Cut a GitHub release BRAT installs from (manual, no Actions)
 release-check: build ## Validate release readiness without publishing
 	node scripts/release.mjs --dry-run
 
-check: typecheck api-check validate secrets-all ## Run the full local gate
+check: typecheck test api-check validate secrets-all ## Run the full local gate

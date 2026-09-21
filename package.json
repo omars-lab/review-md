@@ -8,6 +8,7 @@
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "typecheck": "tsc -noEmit -skipLibCheck",
+    "test": "node --test \"test/**/*.test.ts\"",
     "secrets": "gitleaks git --pre-commit --redact --staged --verbose",
     "secrets:all": "gitleaks dir . --redact --verbose",
     "install:dev": "node scripts/install-dev.mjs",

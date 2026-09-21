@@ -1594,7 +1594,13 @@ export default class ReviewMdPlugin extends Plugin {
       }
       def = `${node}["${label}"]`;
     }
-    return `flowchart TB\n  ${def}`;
+    // Match the live overlay: an open thread recolours its node to the comment
+    // amber; a resolved thread reverts to the native colour (so the card mirrors
+    // exactly what the diagram shows).
+    const styled = thread.resolved
+      ? ""
+      : `\n  classDef reviewCmt fill:#fff3bf,stroke:#f0c000,color:#5c3d00,stroke-width:2px\n  class ${node} reviewCmt`;
+    return `flowchart TB\n  ${def}${styled}`;
   }
 
   /**

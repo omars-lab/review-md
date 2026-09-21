@@ -74,6 +74,45 @@
   white-space: nowrap;
   flex: 1 1 auto;
 }
+
+/* Content-type badge (node / edge / text / image / header) — a compact pill in
+   place of the verbose anchor line; the preview below shows *which* one. */
+.review-md-type-badge {
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  line-height: 1.4;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 0 var(--size-2-2);
+}
+/* Diagram anchors carry the comment amber so the badge ties back to the
+   recoloured node/edge in the diagram. */
+.review-md-type-badge[data-type="node"],
+.review-md-type-badge[data-type="edge"] {
+  color: #5c3d00;
+  background: #fff3bf;
+  border-color: #f0c000;
+}
+
+/* Share — top-right icon on each card (moved out of the action row). */
+.review-md-thread-top .review-md-share {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 2px;
+  color: var(--text-muted);
+}
+.review-md-thread-top .review-md-share:hover {
+  color: var(--text-accent);
+}
+.review-md-thread-top .review-md-share .svg-icon {
+  width: 15px;
+  height: 15px;
+}
 .review-md-resolved-tag {
   font-size: var(--font-ui-smaller);
   color: var(--text-success);
@@ -254,7 +293,17 @@
   height: 13px;
 }
 .review-md-rev-base {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-1);
   color: var(--text-muted);
+}
+.review-md-rev-icon {
+  display: inline-flex;
+}
+.review-md-rev-icon .svg-icon {
+  width: 12px;
+  height: 12px;
 }
 .review-md-show-rev {
   margin-left: auto;

@@ -485,13 +485,17 @@ export class CommentsView extends ItemView {
    * version-stamp fallback. Runs each render; repaints the version rows once known.
    */
   private async computeStaleness(file: TFile): Promise<void> {
+    // Capture the array the flags are computed against: a refresh() during the
+    // await can reassign this.threads, and filtering the NEW array by flags
+    // indexed to the OLD one would mark the wrong threads outdated.
+    const threads = this.threads;
     const [bodyHash, flags] = await Promise.all([
       this.plugin.bodyHashFor(file),
-      Promise.all(this.threads.map((t) => this.plugin.isThreadOutdated(file, t))),
+      Promise.all(threads.map((t) => this.plugin.isThreadOutdated(file, t))),
     ]);
     if (this.file !== file) return; // the user switched files while we awaited
     this.bodyHash = bodyHash;
-    this.outdatedIds = new Set(this.threads.filter((_, i) => flags[i]).map((t) => t.id));
+    this.outdatedIds = new Set(threads.filter((_, i) => flags[i]).map((t) => t.id));
     this.fillVersionRows();
   }
 

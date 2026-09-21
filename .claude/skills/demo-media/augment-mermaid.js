@@ -21,7 +21,7 @@ await (async () => {
     host = [...document.querySelectorAll('.mermaid')].find((m) => m.querySelector('g.node[id*="-CS-"]'));
   }
   if (!host) return 'no-host-after-poll';
-  await p.augmentRenderedMermaid(host, src, 'design.md');
+  await p.augmentRenderedMermaid(host, src, 'designs/design.md');
   await sleep(300);
   return 'badges=' + host.querySelectorAll('.review-md-node-badge').length + ' commented=' + host.querySelectorAll('.review-md-commented').length;
 })()

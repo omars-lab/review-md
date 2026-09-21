@@ -21,7 +21,7 @@ const CATEGORY_ICON: Record<ThreadCategory, string> = {
  * `.<name>.comments.md` sidecar via the plugin), each as a card of messages with
  * a reply box and a share link. Read/write goes through the plugin (readThreads /
  * appendReply / setThreadResolved / buildShareUrl) so the sidebar and the
- * x-callback `reply` action share one code path. See design.md and docs/api/.
+ * x-callback `reply` action share one code path. See docs/designs/design.md and docs/api/.
  */
 export class CommentsView extends ItemView {
   private plugin: ReviewMdPlugin;

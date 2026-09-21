@@ -434,9 +434,12 @@ export default class ReviewMdPlugin extends Plugin {
       const nodeComments = await this.mermaidCommentsFor(source, file.path);
       const edgeComments = await this.mermaidEdgeCommentsFor(source, file.path);
       if (!nodeComments.length && !edgeComments.length) continue;
-      // Already fully overlaid? (node overlay = our re-rendered svg; edge overlay =
-      // a badge per applicable thread). Skip so we don't loop on our own mutations.
-      const nodeDone = !nodeComments.length || !!host.querySelector(".review-md-mermaid svg");
+      // Already fully overlaid? Both node and edge overlays leave a badge per
+      // applicable thread, so a badge each means done. Skip so we don't loop on our
+      // own mutations. (When CM6 rebuilds the widget the badges are gone → re-apply.)
+      const nodeDone = nodeComments.every(
+        (t) => !!host.querySelector(`.review-md-node-badge[data-thread="${t.id}"]`),
+      );
       const edgeDone = edgeComments.every(
         (t) => !!host.querySelector(`.review-md-edge-badge[data-thread="${t.id}"]`),
       );
@@ -450,33 +453,18 @@ export default class ReviewMdPlugin extends Plugin {
     }
   }
 
-  /** Revert Live Preview mermaid widgets to their native render (overlay toggled
-   *  off): drop edge badges, and re-render the original source over any widget we
-   *  replaced with an augmented svg. */
-  private async stripLivePreviewMermaid(view: MarkdownView): Promise<void> {
+  /** Revert Live Preview mermaid widgets to native (overlay toggled off). The
+   *  overlay is now non-destructive, so reverting is just dropping the badges and
+   *  the recolour class — no re-render needed. */
+  private stripLivePreviewMermaid(view: MarkdownView): void {
     const cm = cmOf(view.editor);
-    const file = view.file;
-    if (!cm || !file) return;
-    const mermaid = (window as unknown as { mermaid?: any }).mermaid;
-    const widgets = Array.from(
-      cm.contentDOM.querySelectorAll<HTMLElement>(".cm-embed-block.cm-lang-mermaid"),
-    );
-    for (const widget of widgets) {
-      widget.querySelectorAll(".review-md-edge-badge").forEach((b) => b.remove());
-      const aug = widget.querySelector<HTMLElement>(".review-md-mermaid");
-      if (!aug) continue;
-      const inner = widget.querySelector<HTMLElement>(".mermaid") ?? widget;
-      const source = this.livePreviewMermaidSource(cm, view.editor, widget);
-      if (!source || !mermaid?.render) continue;
-      try {
-        const { svg, bindFunctions } = await mermaid.render("reviewmd-native-" + mkId(), source);
-        inner.empty();
-        inner.innerHTML = svg;
-        bindFunctions?.(inner);
-      } catch (err) {
-        console.error("[review-md] LP mermaid revert failed", err);
-      }
-    }
+    if (!cm) return;
+    cm.contentDOM
+      .querySelectorAll(".review-md-node-badge, .review-md-edge-badge")
+      .forEach((b) => b.remove());
+    cm.contentDOM
+      .querySelectorAll("g.node.review-md-commented")
+      .forEach((g) => g.classList.remove("review-md-commented"));
   }
 
   onunload(): void {
@@ -1427,51 +1415,34 @@ export default class ReviewMdPlugin extends Plugin {
   }
 
   /**
-   * POC-6: replace the built-in mermaid SVG with an augmented render carrying a
-   * comment node per thread. Waits (via observer) for the built-in SVG to land,
-   * then swaps once; if there are no threads for this diagram it leaves the
-   * native render untouched.
+   * Decorate the *native* mermaid SVG in place with comment affordances —
+   * **non-destructive**: no re-render, no source rewrite, no dependency on
+   * `window.mermaid`. A commented node is recoloured (open) or left native
+   * (resolved) and carries a 💬/✓ count badge; a commented edge gets a midpoint
+   * badge. Waits (via observer) for the built-in SVG to land, then applies once;
+   * diagrams with no threads stay 100% native.
+   *
+   * We overlay onto the built-in node/edge (see docs/issues/mermaid-node-restyle.md,
+   * user request 2026-09-20) rather than injecting `rvw_` comment nodes into a
+   * re-render — that disrupted the layout and needed a full re-draw. The `rvw_`
+   * injection now lives only in the explicit **Bake** command.
    */
   private async augmentRenderedMermaid(el: HTMLElement, source: string, sourcePath: string): Promise<void> {
     if (!this.settings.showMermaidComments) return; // overlay hidden → stay 100% native
     const comments = await this.mermaidCommentsFor(source, sourcePath);
     const edgeComments = await this.mermaidEdgeCommentsFor(source, sourcePath);
     if (!comments.length && !edgeComments.length) return; // no threads → stay 100% native
-    const mermaid = (window as unknown as { mermaid?: any }).mermaid;
-    if (comments.length && !mermaid?.render) return;
 
     let applied = false;
-    const obs = new MutationObserver(() => {
-      if (el.querySelector("svg")) void doApply();
-    });
-    const doApply = async (): Promise<void> => {
+    const obs = new MutationObserver(() => void doApply());
+    const doApply = (): void => {
       if (applied) return;
+      const host = (el.querySelector("svg")?.parentElement as HTMLElement | null) ?? el;
+      if (!host.querySelector("svg")) return; // not rendered yet — a later mutation retries
       applied = true;
       obs.disconnect();
       try {
-        let host: HTMLElement;
-        if (comments.length) {
-          // Node comments need a re-render (they inject nodes into the diagram).
-          const augmented = this.buildAugmentedSource(source, comments);
-          const { svg, bindFunctions } = await mermaid.render("reviewmd-" + mkId(), augmented);
-          el.empty();
-          host = el.createDiv({ cls: "review-md-mermaid" });
-          host.innerHTML = svg;
-          bindFunctions?.(host);
-          for (const t of comments) {
-            const g = host.querySelector(`g.node[id^="flowchart-rvw_${t.id}-"]`);
-            if (g) {
-              (g as SVGElement).style.cursor = "pointer";
-              g.addEventListener("click", (e) => {
-                e.stopPropagation();
-                new Notice(`thread ${t.id}: ${t.messages.length} message(s)`);
-              });
-            }
-          }
-        } else {
-          // Edge-only: no re-render, overlay onto the native SVG in place.
-          host = (el.querySelector("svg")?.parentElement as HTMLElement | null) ?? el;
-        }
+        this.styleCommentedNodes(host, comments);
         this.overlayEdgeBadges(host, edgeComments);
       } catch (err) {
         applied = false; // let a later mutation retry
@@ -1479,7 +1450,56 @@ export default class ReviewMdPlugin extends Plugin {
       }
     };
     obs.observe(el, { childList: true, subtree: true });
-    if (el.querySelector("svg")) void doApply();
+    doApply();
+  }
+
+  /**
+   * Recolour each commented node and drop a 💬/✓ count badge on it. Non-destructive:
+   * a CSS class (`review-md-commented`) recolours the built-in shape while the
+   * thread is open and is dropped when resolved (colour reverts to native), and the
+   * badge `<g>` is appended into the node's own `<g class="node">` so it shares the
+   * node's coordinate space. The ```mermaid source is never touched.
+   */
+  private styleCommentedNodes(host: HTMLElement, comments: ReviewThread[]): void {
+    if (!comments.length) return;
+    const svg = host.querySelector("svg");
+    if (!svg) return;
+    const ns = "http://www.w3.org/2000/svg";
+    for (const t of comments) {
+      const a = t.anchor as { node?: string };
+      if (!a.node) continue;
+      const g = svg.querySelector(
+        `g.node[id*="-${a.node}-"], g.node[id$="-${a.node}"]`,
+      ) as SVGGElement | null;
+      if (!g) continue;
+      // Open → recolour the built-in shape; resolved → revert to native colour.
+      g.classList.toggle("review-md-commented", !t.resolved);
+      // Badge (idempotent): skip if this thread's badge is already on the node.
+      if (g.querySelector(`.review-md-node-badge[data-thread="${t.id}"]`)) continue;
+      let bbox: DOMRect;
+      try {
+        bbox = (g as unknown as SVGGraphicsElement).getBBox();
+      } catch {
+        continue; // not measurable yet
+      }
+      const badge = document.createElementNS(ns, "g");
+      badge.setAttribute("class", "review-md-node-badge" + (t.resolved ? " is-resolved" : ""));
+      // Top-right corner of the node, in the node group's local coordinates.
+      badge.setAttribute("transform", `translate(${bbox.x + bbox.width}, ${bbox.y})`);
+      (badge as unknown as HTMLElement).dataset.thread = t.id;
+      badge.style.cursor = "pointer";
+      const circle = document.createElementNS(ns, "circle");
+      circle.setAttribute("r", "11");
+      const text = document.createElementNS(ns, "text");
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("dominant-baseline", "central");
+      const n = t.messages.length;
+      text.textContent = t.resolved ? "✓" : n > 1 ? String(n) : "💬";
+      const title = document.createElementNS(ns, "title");
+      title.textContent = `${a.node}: ${n} message${n === 1 ? "" : "s"}${t.resolved ? " (resolved)" : ""}`;
+      badge.append(title, circle, text);
+      g.appendChild(badge);
+    }
   }
 
   /**

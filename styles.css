@@ -309,24 +309,41 @@ body.review-md-comment-mode .markdown-preview-view * {
   }
 }
 
-/* Mermaid edge/arrow comment badge: a 💬 pill overlaid at the edge midpoint. */
-.review-md-edge-badge circle {
+/* Mermaid comment badge: a 💬 pill overlaid on a commented node (top-right
+   corner) or at a commented edge's midpoint. Shared style for both. */
+.review-md-edge-badge circle,
+.review-md-node-badge circle {
   fill: #fff3bf;
   stroke: #f0c000;
   stroke-width: 1.5px;
 }
-.review-md-edge-badge text {
+.review-md-edge-badge text,
+.review-md-node-badge text {
   fill: #5c3d00;
   font-size: 11px;
   font-weight: 600;
   pointer-events: none;
 }
-.review-md-edge-badge.is-resolved circle {
+.review-md-edge-badge.is-resolved circle,
+.review-md-node-badge.is-resolved circle {
   fill: var(--background-modifier-success, #d3f9d8);
   stroke: var(--interactive-success, #2f9e44);
 }
-.review-md-edge-badge:hover circle {
+.review-md-edge-badge:hover circle,
+.review-md-node-badge:hover circle {
   stroke-width: 2.5px;
+}
+
+/* Commented node: recolour the built-in shape to the comment amber while the
+   thread is open (dropped on resolve → colour reverts to native). Direct-child
+   selectors so the badge's own circle isn't recoloured. */
+g.node.review-md-commented > rect,
+g.node.review-md-commented > polygon,
+g.node.review-md-commented > circle,
+g.node.review-md-commented > path {
+  fill: #fff3bf !important;
+  stroke: #f0c000 !important;
+  stroke-width: 2px !important;
 }
 
 /* Flash a commented edge when its card is clicked in the sidebar. */

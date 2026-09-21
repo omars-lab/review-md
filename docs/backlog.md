@@ -5,6 +5,20 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
 
 ## Deferred
 
+- **Publish review-md as an official Obsidian community plugin** — submit to the
+  in-app plugin directory so users can search "Review MD" and click Install (the
+  truly one-click path). Requires: a PR to `obsidianmd/obsidian-releases` adding the
+  plugin to `community-plugins.json`, passing Obsidian's automated + human review
+  (plugin guidelines: no `innerHTML`/`outerHTML` assignment, proper `onunload`
+  teardown, `isDesktopOnly` honoured, no network calls without disclosure, etc.),
+  and a tagged GitHub release (already automated via `make release`). Pre-req cleanup
+  before submitting: the audit's open findings — esp. **#1 MutationObserver +
+  MarkdownView leak on closed tabs** (lifecycle teardown is exactly what reviewers
+  check) — plus a scan for any `innerHTML` usage. Until this lands, BRAT
+  (`omars-lab/review-md`) is the install path. Requested 2026-09-21. ROI: high value
+  (widest reach, best UX) but gated on review turnaround (days–weeks) and the
+  lifecycle fixes; do the hardening pass first, then submit.
+
 - ~~**Make `docs/` the tracked Obsidian dev vault so Revisions v-numbers render**~~ —
   **DONE 2026-09-21.** `git mv design.md → docs/designs/design.md` (history preserved),
   `docs/` is now the dev vault (config + fixtures gitignored, docs + review sidecars

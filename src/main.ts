@@ -60,16 +60,25 @@ const POC4_THREADS = 50;
 export interface ReviewMessage { author: string; ts: string; body: string; }
 /**
  * The version a comment was authored against (req: track comments per committed
- * version of the file). `bodyHash` is a sha256 of the document BODY with the
- * YAML frontmatter stripped — frontmatter is where the comments live, so hashing
- * the whole file would change every time a comment is added and false-flag every
- * thread. `git`, present only when the file is in a git work tree, records the
- * short HEAD commit and the committed blob (`HEAD:<path>`) so a reviewer/agent
+ * version of the file).
+ *
+ * `anchorHash` is the primary staleness signal: a sha256 of just the content THIS
+ * thread anchors to (the mermaid node's declaration, the anchored block/heading
+ * text, the image src) at authoring time. A thread is "outdated" only when its own
+ * anchored content changes or is removed — edits elsewhere in the file don't count
+ * (Omar, 2026-09-21: "unless on our latest, we removed content"). It's absent only
+ * for anchors we can't precisely extract, or on legacy threads.
+ *
+ * `bodyHash` is a sha256 of the whole document BODY (YAML frontmatter stripped, so
+ * comment churn in the sidecar never counts) — kept as the coarse fallback used
+ * when `anchorHash` can't be computed. `git`, present only in a git work tree,
+ * records the short commit and committed blob (`HEAD:<path>`) so a reviewer/agent
  * can `git show <commit>:<path>` the exact reviewed text. See
  * docs/issues/version-stamping.md.
  */
 export interface ReviewRev {
   bodyHash: string;
+  anchorHash?: string;
   ts: string;
   git?: { commit: string; blob: string };
 }
@@ -149,6 +158,34 @@ export function removeBlockIdFromText(text: string, blockId: string): string {
     .replace(new RegExp(`[ \\t]+\\^${esc}(?=[ \\t]*$)`, "gm"), "")
     .replace(new RegExp(`^\\^${esc}[ \\t]*\\r?\\n?`, "gm"), "");
 }
+
+/**
+ * The text of the block bearing `^blockId`, with the id marker stripped, or null
+ * if the id isn't present in `text`. A "block" is the run of consecutive non-blank
+ * lines around the id line (stopping at a blank line or a code fence) — the same
+ * unit a text anchor points at. Used by the per-anchor staleness check to read
+ * just the anchored block's current content from the latest file.
+ */
+export function blockTextFor(text: string, blockId: string): string | null {
+  const esc = blockId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const idRe = new RegExp(`(^|\\s)\\^${esc}[ \\t]*$`);
+  const lines = text.split(/\r?\n/);
+  const idx = lines.findIndex((l) => idRe.test(l));
+  if (idx < 0) return null;
+  const fence = (l: string) => /^[ \t]*`{3,}/.test(l);
+  let start = idx;
+  let end = idx;
+  while (start > 0 && lines[start - 1].trim() !== "" && !fence(lines[start - 1])) start--;
+  while (end + 1 < lines.length && lines[end + 1].trim() !== "" && !fence(lines[end + 1])) end++;
+  return removeBlockIdFromText(lines.slice(start, end + 1).join("\n"), blockId).trim();
+}
+
+/** Alternation of every mermaid node shape wrapper (`[..]`, `(..)`, `([..])`, …),
+ *  longest-first so `[[..]]` wins over `[..]`. Used to pull a node's declared
+ *  shape+label out of diagram source. Kept in one place — the preview builders and
+ *  the per-anchor staleness check must read node declarations identically. */
+const MERMAID_SHAPES =
+  "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
 
 /** Short hex sha256 of a string (Web Crypto — available in the renderer). */
 async function sha256Short(text: string, len = 12): Promise<string> {
@@ -820,6 +857,12 @@ export default class ReviewMdPlugin extends Plugin {
       const blockId = await this.ensureTextBlockId(file, id, (anchor as { line?: number }).line);
       if (blockId) (anchor as Record<string, unknown>).blockId = blockId;
     }
+    // Per-anchor staleness stamp: hash of just what this thread anchors to, taken
+    // AFTER the `^blockId` is placed (so a text anchor hashes the block it resolves
+    // to). git/bodyHash above were computed BEFORE that write, so our own `^id`
+    // never flips this thread's git stamp to WORKING_REV.
+    const anchorHash = await this.anchorHashFor(file, anchor);
+    if (anchorHash) rev.anchorHash = anchorHash;
     await this.mutateReview(file, (data) => {
       data.threads.push({ id, anchor, resolved: false, messages: [], rev });
     });
@@ -880,7 +923,98 @@ export default class ReviewMdPlugin extends Plugin {
     return sha256Short(stripBlockIds(stripFrontmatter(text)));
   }
 
-  /** Version stamp for a new thread: body hash + git commit/blob when available. */
+  /**
+   * The current text of *just what a thread anchors to*, read from the latest file
+   * — the per-anchor staleness signal (a thread is outdated only when ITS content
+   * changed, not when the file changed anywhere; Omar, 2026-09-21):
+   *   - `string`    → the anchored content as it stands now (node declaration, edge
+   *                   link line, block/heading text, image src), normalised.
+   *   - `null`      → the target is gone (node/edge/block/heading/image removed) →
+   *                   the thread is outdated.
+   *   - `undefined` → this anchor can't be precisely extracted → caller falls back
+   *                   to the coarse `bodyHash`.
+   * Normalisation collapses whitespace so reflowing/re-indenting the anchored text
+   * without changing its words doesn't count as a change.
+   */
+  async anchorContentFor(
+    file: TFile,
+    anchor: Record<string, unknown>,
+  ): Promise<string | null | undefined> {
+    const a = anchor as {
+      type?: string;
+      node?: string;
+      from?: string;
+      to?: string;
+      quote?: string;
+      blockId?: string;
+      src?: string;
+    };
+    const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+    switch (a.type) {
+      case "mermaidNode": {
+        if (!a.node) return undefined;
+        const blocks = await this.mermaidBlocksIn(file);
+        for (const b of blocks) {
+          const dm = b.match(new RegExp(`\\b${escapeRegExp(a.node)}\\s*(${MERMAID_SHAPES})`));
+          if (dm) return norm(`${a.node}${dm[1]}`); // declared node: id + shape/label
+        }
+        // Present but label-less (only ever named as an edge endpoint): its identity
+        // is the id itself, so it's "unchanged" as long as the id still appears.
+        const idRe = new RegExp(`(^|[^\\w])${escapeRegExp(a.node)}([^\\w]|$)`, "m");
+        if (blocks.some((b) => idRe.test(b))) return a.node;
+        return null; // node removed
+      }
+      case "mermaidEdge": {
+        if (!a.from || !a.to) return undefined;
+        const blocks = await this.mermaidBlocksIn(file);
+        const link = new RegExp(
+          `\\b${escapeRegExp(a.from)}\\b[^\\n]*?(?:--+>?|==+>?|-\\.-*>?|~~+)[^\\n]*?\\b${escapeRegExp(a.to)}\\b`,
+        );
+        for (const b of blocks) {
+          const m = b.match(link);
+          if (m) return norm(m[0]);
+        }
+        return null; // edge removed
+      }
+      case "text": {
+        const body = stripFrontmatter(await this.app.vault.read(file));
+        if (a.blockId) {
+          const block = blockTextFor(body, a.blockId);
+          return block == null ? null : norm(block);
+        }
+        if (a.quote) return norm(body).includes(norm(a.quote)) ? norm(a.quote) : null;
+        return undefined; // no durable anchor to check
+      }
+      case "header": {
+        if (!a.quote) return undefined;
+        const body = stripFrontmatter(await this.app.vault.read(file));
+        const q = norm(a.quote);
+        const present = body.split(/\r?\n/).some((l) => {
+          const m = l.match(/^#{1,6}\s+(.*)$/);
+          return m != null && norm(m[1].replace(/\s+\^[A-Za-z0-9_-]+\s*$/, "")) === q;
+        });
+        return present ? q : null;
+      }
+      case "image": {
+        if (!a.src) return undefined;
+        const text = await this.app.vault.read(file);
+        return text.includes(a.src) ? a.src : null;
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  /** Hash of a thread's anchored content (see anchorContentFor), or undefined when
+   *  the anchor can't be precisely extracted (caller falls back to bodyHash). */
+  async anchorHashFor(file: TFile, anchor: Record<string, unknown>): Promise<string | undefined> {
+    const content = await this.anchorContentFor(file, anchor);
+    return typeof content === "string" ? await sha256Short(content) : undefined;
+  }
+
+  /** Version stamp for a new thread: body hash + git commit/blob when available.
+   *  The per-anchor `anchorHash` is added by createThread AFTER any `^blockId` is
+   *  placed, so a text anchor hashes the block it will actually resolve to. */
   private async buildRev(file: TFile): Promise<ReviewRev> {
     const rev: ReviewRev = { bodyHash: await this.bodyHashFor(file), ts: new Date().toISOString() };
     const git = await this.gitRevFor(file);
@@ -957,13 +1091,25 @@ export default class ReviewMdPlugin extends Plugin {
   }
 
   /**
-   * Is a thread stale — has the reviewed body changed since it was authored?
-   * Decided by `bodyHash` alone (frontmatter excluded, so comment churn doesn't
-   * count). Threads with no `rev` (e.g. seeded fixtures) are never "outdated".
+   * Is a thread stale? Per-anchor: a thread is "outdated" only when the content IT
+   * anchors to changed or was removed since it was authored — an edit to an
+   * unrelated part of the file leaves it current (Omar, 2026-09-21: "unless on our
+   * latest, we removed content"). When the thread carries an `anchorHash` we compare
+   * against just its anchored content now; if that content can't be extracted we
+   * fall back to the coarse whole-body `bodyHash`. Threads with no `rev` (e.g.
+   * seeded fixtures) are never outdated.
    */
   async isThreadOutdated(file: TFile, thread: ReviewThread): Promise<boolean> {
-    if (!thread.rev?.bodyHash) return false;
-    return (await this.bodyHashFor(file)) !== thread.rev.bodyHash;
+    const rev = thread.rev;
+    if (!rev) return false;
+    if (rev.anchorHash) {
+      const content = await this.anchorContentFor(file, thread.anchor);
+      if (content === null) return true; // the anchored target is gone
+      if (typeof content === "string") return (await sha256Short(content)) !== rev.anchorHash;
+      // content === undefined: can't extract precisely → fall through to bodyHash
+    }
+    if (!rev.bodyHash) return false;
+    return (await this.bodyHashFor(file)) !== rev.bodyHash;
   }
 
   /**

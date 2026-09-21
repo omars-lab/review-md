@@ -26,6 +26,16 @@ repos:
         pass_filenames: false
         files: '^(src/protocol/xcallback\.schema\.json|scripts/gen-xcallback-api\.mjs|docs/api/)'
 
+      # Schema-check any comment sidecar being committed: required fields, known
+      # anchor types, and — the common trap — hash fields YAML would parse as
+      # numbers unless quoted. pass_filenames so it only re-checks staged sidecars.
+      # See scripts/validate-comments.mjs / docs/issues/comment-metadata-validation.md.
+      - id: validate-comments
+        name: validate review-md comment sidecar metadata
+        entry: node scripts/validate-comments.mjs --quiet
+        language: system
+        files: '(^|/)\.[^/]+\.comments\.md$'
+
       # post-commit stage: after a commit lands, re-anchor any working-copy comment
       # threads whose reviewed file was just committed (WORKING_REV → real commit).
       # The reviewed file is committed in the CLI, not Obsidian, so this runs here

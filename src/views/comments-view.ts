@@ -145,16 +145,10 @@ export class CommentsView extends ItemView {
       return;
     }
 
-    // Recompute the body hash so stale threads can be flagged, then repaint the
+    // Resolve staleness so drifted threads can be flagged, then repaint the
     // affected cards. Async: the initial paint shows cards, staleness lands a
     // tick later (no layout jump — the badge slots into a reserved row).
-    const file = this.file;
-    void this.plugin.bodyHashFor(file).then((h) => {
-      if (this.file === file) {
-        this.bodyHash = h;
-        this.fillVersionRows();
-      }
-    });
+    void this.computeStaleness(this.file);
 
     const header = root.createDiv({ cls: "review-md-header" });
     header.createEl("h3", { text: this.file.basename });
@@ -364,20 +358,30 @@ export class CommentsView extends ItemView {
   }
 
   /**
+   * Resolve which threads have drifted, per-anchor: a thread is "outdated" only
+   * when the content IT anchors to changed or was removed, not when the file
+   * changed anywhere (plugin.isThreadOutdated). Also caches the body hash for the
+   * version-stamp fallback. Runs each render; repaints the version rows once known.
+   */
+  private async computeStaleness(file: TFile): Promise<void> {
+    const [bodyHash, flags] = await Promise.all([
+      this.plugin.bodyHashFor(file),
+      Promise.all(this.threads.map((t) => this.plugin.isThreadOutdated(file, t))),
+    ]);
+    if (this.file !== file) return; // the user switched files while we awaited
+    this.bodyHash = bodyHash;
+    this.outdatedIds = new Set(this.threads.filter((_, i) => flags[i]).map((t) => t.id));
+    this.fillVersionRows();
+  }
+
+  /**
    * Fill each card's `.review-md-rev` slot with the version the comment was
    * authored on — always, so a reader can see which commit/version of the
-   * artifact a comment belongs to — plus an "outdated" warning when the reviewed
-   * body has changed since. Runs after render() resolves the current body hash.
+   * artifact a comment belongs to — plus an "outdated" warning when the anchored
+   * content has changed since. Runs after computeStaleness resolves drift.
    */
   private fillVersionRows(): void {
     if (!this.file) return;
-    // Recompute which threads have drifted, so categoryOf() can mark them
-    // "hidden" and the chips/filter reflect it.
-    this.outdatedIds = new Set(
-      this.threads
-        .filter((t) => t.rev?.bodyHash && this.bodyHash != null && t.rev.bodyHash !== this.bodyHash)
-        .map((t) => t.id),
-    );
     const byId = new Map(this.threads.map((t) => [t.id, t]));
     this.contentEl.querySelectorAll<HTMLElement>(".review-md-thread").forEach((card) => {
       const id = card.dataset.threadId;

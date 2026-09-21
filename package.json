@@ -15,7 +15,9 @@
     "api:docs": "node scripts/gen-xcallback-api.mjs",
     "api:check": "node scripts/gen-xcallback-api.mjs --check",
     "threads": "node scripts/review-threads.mjs",
-    "reanchor": "node scripts/reanchor-comments.mjs"
+    "reanchor": "node scripts/reanchor-comments.mjs",
+    "validate": "node scripts/validate-comments.mjs",
+    "validate:fix": "node scripts/validate-comments.mjs --fix"
   },
   "keywords": ["obsidian", "obsidian-plugin", "markdown", "review", "comments", "annotations"],
   "author": "omars-lab",

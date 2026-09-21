@@ -403,9 +403,38 @@
   width: 12px;
   height: 12px;
 }
-.review-md-show-rev {
-  margin-left: auto;
+/* Content Revisions — a collapsed accordion at the foot of the card. */
+.review-md-revisions {
+  margin-top: var(--size-4-2);
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: var(--size-4-1);
+}
+.review-md-revisions-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  list-style: none;
+  cursor: pointer;
+  color: var(--text-muted);
   font-size: var(--font-ui-smaller);
+  user-select: none;
+}
+.review-md-revisions-summary::-webkit-details-marker {
+  display: none;
+}
+.review-md-revisions-summary:hover {
+  color: var(--text-normal);
+}
+.review-md-revisions-caret {
+  display: inline-flex;
+  transition: transform 120ms ease;
+}
+.review-md-revisions-caret .svg-icon {
+  width: 13px;
+  height: 13px;
+}
+.review-md-revisions[open] .review-md-revisions-caret {
+  transform: rotate(90deg);
 }
 .review-md-reviewed {
   margin: var(--size-4-1) 0;

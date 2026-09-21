@@ -529,25 +529,40 @@ export class CommentsView extends ItemView {
         badge.createSpan({ text: "outdated" });
       }
 
-      // The affordance to view the exact version this comment was made against.
-      const show = labeledButton(slot, "history", "Show reviewed version", "review-md-show-rev");
-      show.onclick = () => void this.showReviewedVersion(thread, card);
+      // The exact text this comment was made against lives in a collapsed
+      // "Content Revisions" accordion at the foot of the card (not a button up
+      // here); it loads lazily the first time it's expanded.
+      this.addRevisionsAccordion(thread, card);
     });
     // Drift is now known — repaint chip counts + apply the filter.
     this.applyFilter();
   }
 
-  /** Toggle an inline panel showing the text as it was when the comment was made. */
-  private async showReviewedVersion(thread: ReviewThread, card: HTMLElement): Promise<void> {
+  /**
+   * A collapsed "Content Revisions" accordion at the foot of the card. Expanding
+   * it reveals the text as it was when the comment was made; the content is
+   * fetched lazily the first time it's opened. Idempotent across re-renders.
+   */
+  private addRevisionsAccordion(thread: ReviewThread, card: HTMLElement): void {
+    card.querySelector(".review-md-revisions")?.remove(); // drop a stale one on repaint
+    const acc = card.createEl("details", { cls: "review-md-revisions" });
+    const summary = acc.createEl("summary", { cls: "review-md-revisions-summary" });
+    setIcon(summary.createSpan({ cls: "review-md-revisions-caret" }), "chevron-right");
+    summary.createSpan({ cls: "review-md-revisions-label", text: "Content Revisions" });
+    let loaded = false;
+    acc.addEventListener("toggle", () => {
+      if (!acc.open || loaded) return;
+      loaded = true;
+      void this.fillReviewedVersion(thread, acc);
+    });
+  }
+
+  /** Render the reviewed-version snippet into the expanded accordion body. */
+  private async fillReviewedVersion(thread: ReviewThread, acc: HTMLElement): Promise<void> {
     if (!this.file) return;
-    const existing = card.querySelector(".review-md-reviewed");
-    if (existing) {
-      existing.remove();
-      return;
-    }
     const quote = typeof thread.anchor?.quote === "string" ? thread.anchor.quote : "";
     const body = await this.plugin.reviewedBodyFor(this.file, thread);
-    const box = card.createDiv({ cls: "review-md-reviewed" });
+    const box = acc.createDiv({ cls: "review-md-reviewed" });
     if (body !== null) {
       const commit = thread.rev?.git?.commit ?? "";
       box.createDiv({ cls: "review-md-reviewed-label", text: `reviewed @ ${commit}` });

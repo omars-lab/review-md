@@ -5,6 +5,14 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
 
 ## Deferred
 
+- **Fix mermaid augment lost on reading-view re-render/scroll** — badges don't reliably
+  re-apply when a diagram scrolls into view or the section re-renders, because the augment
+  uses a one-shot `MutationObserver` that disconnects after first apply. Researched
+  2026-09-21: the idiomatic fix is `ctx.addChild(new MarkdownRenderChild(el))` with a
+  **persistent, idempotent** observer tied to the section lifecycle (not fire-once). Full
+  findings, code sketch, and trade-offs in [`docs/research.md`](research.md). Instrument the
+  post-processor to confirm re-fire timing before implementing.
+
 - **Comment on a link (`link` anchor type)** — in comment mode, **double-clicking a link**
   selects the *entire* link and starts a thread anchored to it (rather than the surrounding
   `text` block). New anchor type `link` alongside `text`/`header`/`image`/`mermaidNode`/

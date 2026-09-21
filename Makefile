@@ -1,5 +1,5 @@
 # review-md — one target per check; CI calls these same targets (local == CI parity).
-.PHONY: help install hooks build dev typecheck secrets secrets-all precommit check api-docs api-check
+.PHONY: help install hooks build dev typecheck secrets secrets-all precommit check api-docs api-check reanchor
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -8,8 +8,9 @@ help: ## Show this help
 install: ## Install node deps
 	npm install
 
-hooks: ## Install git pre-commit hooks
+hooks: ## Install git pre-commit + post-commit hooks
 	pre-commit install
+	pre-commit install --hook-type post-commit
 
 build: ## Type-check and build the plugin bundle
 	npm run build
@@ -31,6 +32,9 @@ api-docs: ## Regenerate docs/api/* from the x-callback schema
 
 api-check: ## Fail if docs/api/* are stale vs the schema (what the pre-commit hook runs)
 	node scripts/gen-xcallback-api.mjs --check
+
+reanchor: ## Re-anchor working-copy comment threads to their commit (what the post-commit hook runs)
+	node scripts/reanchor-comments.mjs
 
 precommit: ## Run all pre-commit hooks against all files
 	pre-commit run --all-files

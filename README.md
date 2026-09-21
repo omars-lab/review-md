@@ -82,45 +82,59 @@ count and filter open / hidden / resolved.
 
 ## Install
 
-review-md is desktop-only and not yet in the community-plugin store, so install it
-manually for now.
+review-md is desktop-only. It's not in the community-plugin store yet
+([planned](docs/backlog.md)), so the easiest install today is **BRAT**.
 
-### From source (recommended today)
+### Easiest: BRAT (auto-updating)
+
+[BRAT](https://github.com/TfTHacker/obsidian42-brat) installs a plugin straight from
+a GitHub repo and keeps it updated — no cloning, no build.
+
+1. In Obsidian, install and enable the **BRAT** community plugin.
+2. Command palette → **BRAT: Add a beta plugin** → paste `omars-lab/review-md`.
+3. Enable **Review MD** under Settings → Community plugins.
+
+BRAT then pulls new versions automatically whenever a release is cut.
+
+### Into your own vault, from source
+
+If you'd rather build it yourself and drop it straight into a vault:
 
 ```sh
 git clone https://github.com/omars-lab/review-md
 cd review-md
-nvm use            # Node from .nvmrc (v22.22.3)
+nvm use                              # Node from .nvmrc (v22.22.3)
 npm install
-npm run build      # → main.js
+make install-vault VAULT=/path/to/your/vault   # build + copy the plugin in
 ```
 
-Then copy the three build artifacts into your vault and enable the plugin:
-
-```sh
-# from the repo, with VAULT pointing at your Obsidian vault:
-mkdir -p "$VAULT/.obsidian/plugins/review-md"
-cp main.js manifest.json styles.css "$VAULT/.obsidian/plugins/review-md/"
-```
-
-In Obsidian: **Settings → Community plugins → turn off Restricted mode** (if needed),
-then enable **review-md**. Open any Markdown file and run **review-md: Open comments
-view** from the command palette (or click a rendered element to start a thread).
+Then enable **Review MD** under Settings → Community plugins (turn off Restricted
+mode first if this is a fresh vault). Open any Markdown file and run **review-md:
+Open comments view** from the command palette, or click a rendered element to start
+a thread.
 
 ### Try it in a throwaway vault
 
 Want to see it working without touching your own vault? The repo ships a dev vault:
 
 ```sh
-npm run install:dev   # installs the plugin into docs/ (the dev vault) + a sample doc
+npm run install:dev   # symlinks the plugin into docs/ (the dev vault) + a sample doc
 ```
 
 Open the `docs/` folder as a vault in Obsidian and open `designs/design.md` — a
 git-tracked dogfood doc that comes with live comment threads.
 
-### Community store / BRAT
+### Cutting a release (maintainers)
 
-Planned, not yet available. Until then, use the source install above.
+Releases are manual — no GitHub Actions. Bump the version in lock-step, commit, then
+publish a GitHub release BRAT/​the store install from (needs an authenticated `gh`):
+
+```sh
+make version V=1.0.0   # updates manifest.json + package.json + versions.json together
+git commit -am "Release 1.0.0"
+make release-check     # validate readiness (version consistency, assets, clean tree)
+make release           # cuts the GitHub release; tag == manifest version, exactly
+```
 
 ---
 

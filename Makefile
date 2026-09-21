@@ -1,5 +1,5 @@
-# review-md — one target per check; CI calls these same targets (local == CI parity).
-.PHONY: help install hooks build dev typecheck secrets secrets-all precommit check api-docs api-check reanchor validate validate-fix
+# review-md — one target per check; local hooks call these same targets (no CI service).
+.PHONY: help install hooks build dev typecheck secrets secrets-all precommit check api-docs api-check reanchor validate validate-fix install-vault version release release-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -49,5 +49,17 @@ env-restore: ## Restore .env.keys from LastPass (requires `lpass login`)
 	@printf 'DOTENV_PRIVATE_KEY="%s"\n' \
 		"$$(lpass show 'dotenvx/review-md/DOTENV_PRIVATE_KEY' --password | tr -d '\r\n')" \
 		> .env.keys && chmod 600 .env.keys && echo "restored .env.keys from LastPass (chmod 600)"
+
+install-vault: build ## Copy the built plugin into a real vault: make install-vault VAULT=<path>
+	node scripts/install-plugin.mjs "$(VAULT)"
+
+version: ## Bump version in lock-step (manifest/package/versions): make version V=<x.y.z>
+	node scripts/version.mjs "$(V)"
+
+release: build ## Cut a GitHub release BRAT installs from (manual, no Actions)
+	node scripts/release.mjs
+
+release-check: build ## Validate release readiness without publishing
+	node scripts/release.mjs --dry-run
 
 check: typecheck api-check validate secrets-all ## Run the full local gate

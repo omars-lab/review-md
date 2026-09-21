@@ -1,5 +1,12 @@
 # Mermaid augmented render — how we landed on a post-processor
 
+> **Superseded (2026-09-21):** finding 3's premise — that the post-processor "runs as part of
+> *every* render" — is **false for reading view**. Obsidian caches rendered sections and does not
+> re-run the post-processor when it restores one on scroll-in, so the overlay silently vanished. The
+> overlay is now driven by a per-view `MutationObserver`, not the post-processor. Full pivot record:
+> [`mermaid-augment-lifecycle.md`](mermaid-augment-lifecycle.md). The rest of this doc still holds
+> (why not a code-block processor, why not a one-shot DOM swap).
+
 **Context:** requirement 9 needs comments on a mermaid node to show as *connected* nodes in the
 rendered diagram, without editing the stored ```mermaid source (threads live in frontmatter).
 
@@ -16,8 +23,9 @@ rendered diagram, without editing the stored ```mermaid source (threads live in 
    own markdown renderer, not the public code-block registry. Result — built-in SVG rendered, our
    handler never fired (no host, no `<pre>` fallback). Confirmed live.
 
-3. **`registerMarkdownPostProcessor` (adopted).** Runs as part of *every* render of a section, so
-   augmentation re-applies on scroll/edit/reload — fixing (1)'s revert problem structurally. We read
+3. **`registerMarkdownPostProcessor` (adopted, later superseded — see below).** Runs as part of
+   *every* render of a section, so augmentation re-applies on scroll/edit/reload — fixing (1)'s
+   revert problem structurally. We read
    the fence source via `ctx.getSectionInfo` (the stored source verbatim), read `mermaidNode`
    threads from frontmatter, wait (MutationObserver) for the built-in SVG, then swap once to
    `window.mermaid.render(source + injected comment nodes)`, and wire node clicks → thread. Diagrams

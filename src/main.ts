@@ -6,7 +6,6 @@ import {
   Editor,
   debounce,
   normalizePath,
-  MarkdownPostProcessorContext,
   parseYaml,
   stringifyYaml,
 } from "obsidian";
@@ -231,6 +230,16 @@ export default class ReviewMdPlugin extends Plugin {
    *  mutation the augment itself causes doesn't re-enter. */
   private lpObservers = new WeakMap<MarkdownView, MutationObserver>();
   private lpAugmenting = new WeakSet<HTMLElement>();
+  /** Reading-view mermaid augmenter state. The markdown post-processor fires only
+   *  at a section's *first* render and does NOT re-run when Obsidian restores a
+   *  cached section on scroll-in / re-layout (verified — see
+   *  docs/issues/mermaid-augment-lifecycle.md), so a `ctx.addChild` observer is
+   *  never re-created and the overlay is lost. Reading view is therefore driven the
+   *  same way as Live Preview: one MutationObserver per view on the reading
+   *  container, re-applying whenever a mermaid `<svg>` (re)appears. `rvAugmenting`
+   *  guards a host mid-apply so our own badge writes don't re-enter. */
+  private rvObservers = new WeakMap<MarkdownView, MutationObserver>();
+  private rvAugmenting = new WeakSet<HTMLElement>();
 
   async onload(): Promise<void> {
     console.log("[review-md] loaded");
@@ -321,31 +330,24 @@ export default class ReviewMdPlugin extends Plugin {
     });
 
     // POC-6: augmented mermaid render. Obsidian renders mermaid through its own
-    // markdown renderer (not the public code-block registry), so we can't
-    // override it with registerMarkdownCodeBlockProcessor. Instead we
-    // post-process: wait for the built-in SVG, then replace it with a render of
-    // `source + injected comment nodes`. Running inside the post-processor means
-    // it re-applies on every re-render (scroll/edit) — unlike a one-shot DOM
-    // poke, which Obsidian's next render reverts. Diagram source is untouched.
-    this.registerMarkdownPostProcessor((el, ctx) => {
-      const src = this.mermaidSourceFor(el, ctx);
-      if (src === null) return;
-      void this.augmentRenderedMermaid(el, src, ctx.sourcePath);
-    });
-
-    // Live Preview parity (#24): the post-processor above never runs in the CM6
-    // editor, so LP mermaid diagrams would show none of the overlay. Drive it from
-    // a MutationObserver on the active editor's `.cm-content` instead — when CM6
-    // renders (or rebuilds) a mermaid widget we augment it, and a rebuild that
-    // strips our overlay simply fires the observer again. Re-attach on leaf/file
-    // changes since a new file may open into a source-mode leaf.
+    // markdown renderer (not the public code-block registry), so we can't override
+    // it with registerMarkdownCodeBlockProcessor. A markdown post-processor is also
+    // the wrong hook: it runs only at a section's *first* render and does NOT
+    // re-fire when Obsidian restores a cached mermaid section on scroll-in / theme
+    // change / re-layout (verified empirically — docs/issues/mermaid-augment-lifecycle.md),
+    // so any overlay it applies is silently lost and never re-applied. Instead we
+    // drive BOTH reading view and Live Preview from a MutationObserver on each
+    // view's render container: whenever a mermaid `<svg>` (re)appears we decorate
+    // it, and a restore/rebuild that strips the overlay simply fires the observer
+    // again. Re-attach on leaf/file changes since a new file may open into either
+    // mode. Diagram source is untouched.
     this.registerEvent(
-      this.app.workspace.on("active-leaf-change", () => this.ensureLivePreviewAugmenter()),
+      this.app.workspace.on("active-leaf-change", () => this.ensureMermaidAugmenter()),
     );
     this.registerEvent(
-      this.app.workspace.on("file-open", () => this.ensureLivePreviewAugmenter()),
+      this.app.workspace.on("file-open", () => this.ensureMermaidAugmenter()),
     );
-    this.app.workspace.onLayoutReady(() => this.ensureLivePreviewAugmenter());
+    this.app.workspace.onLayoutReady(() => this.ensureMermaidAugmenter());
 
     // Durable text anchoring (req: block-refs survive edits): stamp each rendered
     // section with its source line range so a click can locate the exact source
@@ -407,13 +409,22 @@ export default class ReviewMdPlugin extends Plugin {
     );
   }
 
-  /** Attach a debounced MutationObserver to the active source-mode editor's
-   *  `.cm-content` (once per view) so mermaid widgets get the comment overlay in
-   *  Live Preview, and re-scan an already-observed view. No-op in reading view
-   *  (the post-processor covers that) or when the overlay is toggled off. */
-  private ensureLivePreviewAugmenter(): void {
+  /** Attach the right mermaid augmenter to the active markdown view for its
+   *  current mode: a `.cm-content` observer in Live Preview (source mode) or a
+   *  reading-container observer in reading mode. Each is idempotent per view, so
+   *  this is safe to call on every leaf/file change. */
+  private ensureMermaidAugmenter(): void {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!view || view.getMode?.() !== "source") return;
+    if (!view) return;
+    if (view.getMode?.() === "source") this.ensureLivePreviewAugmenter(view);
+    else this.ensureReadingViewAugmenter(view);
+  }
+
+  /** Attach a debounced MutationObserver to the source-mode editor's `.cm-content`
+   *  (once per view) so mermaid widgets get the comment overlay in Live Preview,
+   *  and re-scan an already-observed view. No-op when the overlay is toggled off. */
+  private ensureLivePreviewAugmenter(view: MarkdownView): void {
+    if (view.getMode?.() !== "source") return;
     if (this.lpObservers.has(view)) {
       void this.scanLivePreviewMermaid(view);
       return;
@@ -426,6 +437,94 @@ export default class ReviewMdPlugin extends Plugin {
     this.lpObservers.set(view, obs);
     this.register(() => obs.disconnect());
     void this.scanLivePreviewMermaid(view);
+  }
+
+  /** Attach a debounced MutationObserver to the reading view's render container
+   *  (once per view) so mermaid diagrams get the comment overlay whenever their
+   *  `<svg>` (re)appears — on first render, on scroll-in from cache, and on any
+   *  re-layout that strips the overlay. This replaces the markdown post-processor,
+   *  which does not re-fire on cache restore (docs/issues/mermaid-augment-lifecycle.md).
+   *  Idempotent per view; re-scans an already-observed view. */
+  private ensureReadingViewAugmenter(view: MarkdownView): void {
+    if (view.getMode?.() === "source") return;
+    if (this.rvObservers.has(view)) {
+      void this.scanReadingViewMermaid(view);
+      return;
+    }
+    // `previewMode.containerEl` is the stable per-view reading-view element; its
+    // subtree is what Obsidian populates/restores as sections render and scroll.
+    const container =
+      (view.previewMode as unknown as { containerEl?: HTMLElement } | undefined)?.containerEl ??
+      (view.containerEl.querySelector(".markdown-reading-view") as HTMLElement | null);
+    if (!container) return;
+    const scan = debounce(() => void this.scanReadingViewMermaid(view), 120, false);
+    const obs = new MutationObserver(scan);
+    obs.observe(container, { childList: true, subtree: true });
+    this.rvObservers.set(view, obs);
+    this.register(() => obs.disconnect());
+    void this.scanReadingViewMermaid(view);
+  }
+
+  /** Find each rendered mermaid diagram in a reading view and augment any that
+   *  carry threads and aren't already fully overlaid. Source-free: threads are
+   *  matched to a diagram by whether the anchored node/edge actually exists in
+   *  that diagram's rendered SVG, so no `getSectionInfo` is needed. Self-heals:
+   *  when Obsidian restores a cached section (stripping our overlay) the observer
+   *  re-fires and this runs again. `rvAugmenting` prevents re-entry from our own
+   *  badge writes. */
+  private async scanReadingViewMermaid(view: MarkdownView): Promise<void> {
+    if (!this.settings.showMermaidComments) return;
+    if (view.getMode?.() === "source") return;
+    const file = view.file;
+    if (!file) return;
+    const container =
+      (view.previewMode as unknown as { containerEl?: HTMLElement } | undefined)?.containerEl ??
+      (view.containerEl.querySelector(".markdown-reading-view") as HTMLElement | null);
+    if (!container) return;
+    const hosts = Array.from(container.querySelectorAll<HTMLElement>(".mermaid"));
+    if (!hosts.length) return;
+    const threads = await this.readThreads(file);
+    const nodeThreads = threads.filter((t) => (t.anchor as { type?: string }).type === "mermaidNode");
+    const edgeThreads = threads.filter((t) => (t.anchor as { type?: string }).type === "mermaidEdge");
+    if (!nodeThreads.length && !edgeThreads.length) return;
+    for (const host of hosts) {
+      if (this.rvAugmenting.has(host)) continue;
+      const svg = host.querySelector("svg");
+      if (!svg) continue; // not rendered yet — a later mutation retries
+      // Which threads belong to THIS diagram? Those whose anchored node/edge is
+      // present in this SVG. A baked thread (its `rvw_<id>` node is in the diagram)
+      // is skipped so it isn't overlaid on top of its baked-in node.
+      const nodeComments = nodeThreads.filter((t) => {
+        const node = (t.anchor as { node?: string }).node;
+        if (!node) return false;
+        if (svg.querySelector(`g.node[id*="rvw_${t.id}"]`)) return false; // baked in
+        return !!svg.querySelector(`g.node[id*="-${node}-"], g.node[id$="-${node}"]`);
+      });
+      const edgeComments = edgeThreads.filter((t) => {
+        const a = t.anchor as { from?: string; to?: string; index?: number };
+        return a.from && a.to && !!findEdgePath(svg, a.from, a.to, a.index ?? 0);
+      });
+      if (!nodeComments.length && !edgeComments.length) continue;
+      // Already fully overlaid? One badge per node (keyed data-node) and per edge
+      // (keyed data-edge) means done — skip so our own mutations don't loop.
+      const nodeDone = nodeComments.every(
+        (t) => !!host.querySelector(`.review-md-node-badge[data-node="${(t.anchor as { node?: string }).node}"]`),
+      );
+      const edgeDone = edgeComments.every((t) => {
+        const a = t.anchor as { from?: string; to?: string; index?: number };
+        return !!host.querySelector(`.review-md-edge-badge[data-edge="${a.from}-${a.to}-${a.index ?? 0}"]`);
+      });
+      if (nodeDone && edgeDone) continue;
+      this.rvAugmenting.add(host);
+      try {
+        this.styleCommentedNodes(host, nodeComments);
+        this.overlayEdgeBadges(host, edgeComments);
+      } catch (err) {
+        console.error("[review-md] reading-view mermaid augment failed", err);
+      } finally {
+        this.rvAugmenting.delete(host);
+      }
+    }
   }
 
   /** The ```mermaid source of a Live Preview widget: map the widget back to its
@@ -1456,21 +1555,6 @@ export default class ReviewMdPlugin extends Plugin {
       `> Record that observation in docs/pocs/poc-4-frontmatter.md.\n`;
     await this.writeVaultFile("POC-4-report.md", report);
     new Notice(`review-md POC-4: ${pass ? "PASS" : "FAIL"} — see POC-4-report.md`);
-  }
-
-  /**
-   * If `el` is a rendered mermaid code block, return its diagram source (from
-   * the file's raw text via getSectionInfo, so it's the stored source verbatim);
-   * otherwise null. The post-processor runs for every section, so this is the
-   * cheap filter that skips paragraphs, tables, etc.
-   */
-  private mermaidSourceFor(el: HTMLElement, ctx: MarkdownPostProcessorContext): string | null {
-    if (!el.querySelector(".mermaid, code.language-mermaid, pre.language-mermaid")) return null;
-    const info = ctx.getSectionInfo(el);
-    if (!info) return null;
-    const lines = info.text.split("\n").slice(info.lineStart, info.lineEnd + 1);
-    if (!/^\s*```+\s*mermaid\s*$/.test(lines[0] ?? "")) return null;
-    return lines.slice(1, -1).join("\n"); // strip the ``` fences
   }
 
   /**

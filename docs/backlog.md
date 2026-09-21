@@ -5,6 +5,18 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
 
 ## Deferred
 
+- **Comment on a link (`link` anchor type)** — in comment mode, **double-clicking a link**
+  selects the *entire* link and starts a thread anchored to it (rather than the surrounding
+  `text` block). New anchor type `link` alongside `text`/`header`/`image`/`mermaidNode`/
+  `mermaidEdge`; likely fields: `href` (the link target — internal `[[wikilink]]` or external
+  URL), `quote` (the link display text), and the existing `line`/`blockId` for fallback. Render:
+  the reviewer highlights the whole `<a>`/`.internal-link`/`.external-link` element on
+  double-click and anchors there. Staleness (`anchorContentFor`) extracts the link's
+  href+text. Additive — extends the anchor union and `validate-comments` `ANCHOR_REQUIRED`,
+  no breaking change. Requested 2026-09-21. ROI: medium — reuses the click-to-comment plumbing;
+  the new work is link-element hit detection (double-click vs the single-click block anchor) and
+  the extraction case. Pull into a small POC or issue note when picked up.
+
 - **In-image coordinate/region pinning** — anchor a comment to a specific point or rectangle inside
   an image, not just the image as a whole. Traded off 2026-09-19 ("we don't need coordinates for
   images … ready to trade that off if plugins can work") to keep the Obsidian-plugin route, since

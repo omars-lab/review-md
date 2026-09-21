@@ -21,6 +21,38 @@ and threads are shareable/repliable via
 `review-md-open`, `review-md-reply`) is documented in [`docs/api/`](docs/api/xcallback.md)
 — generated from `src/protocol/xcallback.schema.json` and kept in sync by a pre-commit hook.
 
+## Use cases — what the tool powers
+
+The complete set of things a reviewer can do with review-md today, each backed by a
+section below or an issue note under [`docs/issues/`](docs/issues/):
+
+1. **Comment on prose** — click a phrase, block, or heading in the rendered
+   markdown and start a thread anchored to it (`text` / `header` anchors).
+2. **Comment on a diagram element** — click a mermaid **node** or **edge** and the
+   thread anchors to that element by id, surviving re-layout (`mermaidNode` /
+   `mermaidEdge`).
+3. **Comment on an image** — click a rendered image to anchor a thread to it
+   (`image`; sub-image region coords are on the backlog).
+4. **Threaded discussion** — every comment is its own chat thread; author, teammate,
+   and agent (`claude`) messages append in order; **Resolve** closes a thread.
+5. **Augmented diagram render** — mermaid threads render as 💬 comment nodes hung off
+   the diagram **without touching the diagram source** (requirement 9); a **Bake**
+   command can fold them into the source on demand.
+6. **Live-Preview parity** — the same click-to-comment + mermaid overlay works in
+   Obsidian's Live Preview, not only Reading view (see
+   [`docs/issues/live-preview-mermaid-overlay.md`](docs/issues/live-preview-mermaid-overlay.md)).
+7. **Share / reply by link** — any thread produces an `obsidian://review-md-open?…&thread=…`
+   URL; a reply URL reopens the file focused on that thread (x-callback API).
+8. **Version-stamped review** — each thread records the artifact version it was made
+   against, is flagged **outdated** when the reviewed text drifts, and can recover the
+   exact reviewed text via git. See [Version tracking](#version-tracking).
+9. **Review before commit** — comment on the uncommitted **working copy**; a
+   post-commit hook re-anchors those threads to the commit once the file lands
+   (tasks #41–#42).
+10. **Triage the sidebar** — cards carry a content-type badge and version stamp;
+    header **filter chips** (open / hidden / resolved) narrow the list. See
+    [Reviewer sidebar](#reviewer-sidebar).
+
 ## Architecture
 
 Click **Comment store** or **Mermaid augmenter** below — those nodes carry live
@@ -53,8 +85,10 @@ flowchart LR
 | type | anchors to | key fields |
 |---|---|---|
 | `text` | a phrase / block | `line`, `blockId`, `quote` |
+| `header` | a heading | `blockId`, `quote` |
 | `image` | a whole image | `src` (coords deferred → backlog) |
 | `mermaidNode` | a diagram node | `blockId`, `node`, `quote` |
+| `mermaidEdge` | a diagram edge | `blockId`, `from`, `to`, `index`, `quote` |
 
 ## Storage schema (sidecar)
 
@@ -84,6 +118,59 @@ reviewed body later changes, and the exact reviewed text retrieved (`git show
 <commit>:<file>`). `bodyHash` hashes the reviewed file's body only; because
 comments now live in the sidecar, commenting never revises the reviewed file at
 all. See [`docs/issues/version-stamping.md`](docs/issues/version-stamping.md).
+
+## Version tracking
+
+A comment records **which version of the artifact it was made against**, so the
+sidebar can say "commented on `<commit>`", flag a thread **outdated** when the text
+drifts, and recover the exact reviewed text. The model has three parts:
+
+- **Committed version = the last commit that *touched* the md, not HEAD.** HEAD
+  advances with every unrelated commit; the file's real version is the last commit
+  that changed it (`git rev-list -1 --abbrev-commit HEAD -- <path>`). Example: a
+  thread on a file last edited in `28ae788` stays stamped `on 28ae788` even after
+  three later commits move HEAD on without touching it.
+- **Staleness is `bodyHash` alone.** The current body hash (frontmatter stripped)
+  differs from the stored `rev.bodyHash` → **outdated**. This is git-free (works in
+  a plain vault), fires pre-commit, and — because the body excludes frontmatter —
+  never trips on comment churn. `git.commit`/`git.blob` are for identity and
+  retrieval only, never staleness.
+- **Working copy → commit re-anchor.** A thread authored against the uncommitted
+  working tree is stamped with the `WORKING_REV` sentinel and shown as **"working
+  copy"**. A post-commit hook re-anchors those threads to the commit that lands the
+  file, swapping `WORKING_REV` for the real `git.commit`/`git.blob` (tasks #41–#42).
+
+```mermaid
+flowchart LR
+  Author[Author comment] --> Q{file committed?}
+  Q -->|yes| Touch["stamp: last commit that touched md"]
+  Q -->|no| Work["stamp: WORKING_REV → 'working copy'"]
+  Work -.->|post-commit hook| Touch
+  Touch --> Drift{bodyHash changed?}
+  Drift -->|yes| Outdated[flag outdated]
+  Drift -->|no| Current[current]
+```
+
+See [`docs/issues/version-stamping.md`](docs/issues/version-stamping.md) for the
+full rationale (why body hash, why the committed blob, the last-touch pivot).
+
+## Reviewer sidebar
+
+Each thread renders as a card; the panel header aggregates and filters them.
+
+- **Card header** — the short thread id, a **content-type badge**
+  (`node` / `edge` / `text` / `header` / `image`) since the excerpt below already
+  shows *which* element, and a **share** icon (top-right) that emits the thread's
+  x-callback URL.
+- **Version stamp** — `on <commit>` (or **"working copy"**), with an **outdated**
+  warning when the reviewed body has drifted, plus a **Show reviewed version**
+  action to recover the text the comment was made against.
+- **Excerpt / preview** — the anchored text, or for a mermaid node/edge a mini
+  re-render of just that element, recoloured to match the augmented diagram.
+- **Action row** — **Post** (add a message), **Resolve**, and **delete**, together.
+- **Header filter chips** — **N open · N hidden · N resolved** (a thread is
+  *hidden* when its version text has drifted); clicking a chip toggles that
+  category in the list.
 
 ## Requirement 9 — mermaid comment nodes
 

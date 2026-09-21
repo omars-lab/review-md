@@ -20,7 +20,7 @@ rev:
   bodyHash: ea936ad0d737        # sha256 of the document BODY (frontmatter stripped)
   ts: 2026-09-20T03:08:23.565Z
   git:                          # present only when the file is in a git work tree
-    commit: 8dfd923             # short HEAD at authoring time
+    commit: 8dfd923             # last commit that TOUCHED the md (see pivot below)
     blob: 31f7fa6…             # committed blob (HEAD:<relpath>)
 ```
 
@@ -72,6 +72,41 @@ fires immediately (pre-commit), works in non-git vaults, and — crucially — d
 commit would false-flag it — the churn problem `bodyHash` dodges. With the sidecar
 move that specific hazard is gone, but `bodyHash` remains the sole staleness signal
 because it's git-free and frontmatter-agnostic.)
+
+## Pivot: the *last-touching* commit, not HEAD
+
+Recording `commit` as bare `HEAD` was wrong. A file's meaningful "version" is the
+last commit that actually **changed that file**, not whatever HEAD happens to be —
+HEAD moves on with every unrelated commit, so a stamp of `HEAD` would drift away
+from the content it named even though the reviewed bytes never changed.
+
+Evidence from the dogfood vault: `design.md` was last edited in `28ae788`, but by
+the time the sidebar rendered, HEAD had moved three commits on to `85930ea`
+(mermaid restyle work that never touched `design.md`). Stamping `HEAD` would have
+labelled the thread `on 85930ea` — a commit where the reviewed file is byte-for-byte
+identical to `28ae788`. The stamp must read `on 28ae788`.
+
+So `gitRevFor` resolves the commit with:
+
+```
+git rev-list -1 --abbrev-commit HEAD -- <relpath>   # last commit touching the file
+git rev-parse HEAD:<relpath>                          # its committed blob
+```
+
+`rev-list -1 … -- <path>` walks back from HEAD and stops at the first commit that
+modified `<path>`. `blob` stays `HEAD:<relpath>` because the working tree at that
+path equals the last-touching commit's version (nothing since changed it), so the
+blob is stable and `git show <commit>:<path>` still recovers the exact text.
+
+## Working-copy comments (uncommitted rev)
+
+A file can be commented on before its latest edits are committed. In that state
+there is no last-touching commit for the *current* body, so the thread is stamped
+with the `WORKING_REV` sentinel (`"working"`) instead of a `git.commit`, and the
+sidebar shows **"working copy"** rather than `on <commit>`. On the next commit that
+touches the file, a post-commit hook re-anchors those working threads to the new
+commit (see the design doc + backlog). `bodyHash` still carries staleness in the
+working state exactly as for committed threads.
 
 ## Robustness
 

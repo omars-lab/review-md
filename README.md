@@ -112,10 +112,11 @@ view** from the command palette (or click a rendered element to start a thread).
 Want to see it working without touching your own vault? The repo ships a dev vault:
 
 ```sh
-npm run install:dev   # builds .dev-vault with the plugin pre-enabled + a sample doc
+npm run install:dev   # installs the plugin into docs/ (the dev vault) + a sample doc
 ```
 
-Open `.dev-vault` in Obsidian and open `design.md` — it comes with live comment threads.
+Open the `docs/` folder as a vault in Obsidian and open `designs/design.md` — a
+git-tracked dogfood doc that comes with live comment threads.
 
 ### Community store / BRAT
 
@@ -134,8 +135,8 @@ review-md assumes **commits happen in the CLI, reviews happen in Obsidian**:
 3. You can comment on the **uncommitted working copy**; when the CLI later commits the
    file, a **post-commit hook** re-anchors those threads to the landed commit.
 
-See [`design.md`](design.md) (a dogfood doc — open it *in* the reviewer for the full
-experience) and [`docs/issues/`](docs/issues/) for the design rationale.
+See [`docs/designs/design.md`](docs/designs/design.md) (a dogfood doc — open it *in* the
+reviewer for the full experience) and [`docs/issues/`](docs/issues/) for the design rationale.
 
 ---
 

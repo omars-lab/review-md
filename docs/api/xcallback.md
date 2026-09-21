@@ -24,7 +24,7 @@ Open a markdown file in the review-md reviewer and, optionally, scroll to a spec
 Example:
 
 ```
-obsidian://review-md-open?vault=.dev-vault&file=design.md
+obsidian://review-md-open?vault=docs&file=designs%2Fdesign.md
 ```
 
 ## `obsidian://review-md-reply` — Reply to a thread
@@ -44,5 +44,5 @@ Append a message to an existing comment thread stored in the file's frontmatter,
 Example:
 
 ```
-obsidian://review-md-reply?vault=.dev-vault&file=design.md&thread=d1a2b3&body=agreed%20%E2%80%94%20let's%20keep%20it%20in%20frontmatter
+obsidian://review-md-reply?vault=docs&file=designs%2Fdesign.md&thread=d1a2b3&body=agreed%20%E2%80%94%20let's%20keep%20it%20in%20frontmatter
 ```

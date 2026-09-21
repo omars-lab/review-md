@@ -16,7 +16,7 @@
       "get": {
         "operationId": "open",
         "summary": "Open a file in the reviewer",
-        "description": "Open a markdown file in the review-md reviewer and, optionally, scroll to a specific comment thread.\n\nInvoke as: `obsidian://review-md-open?…`\n\nExample: `obsidian://review-md-open?vault=.dev-vault&file=design.md`",
+        "description": "Open a markdown file in the review-md reviewer and, optionally, scroll to a specific comment thread.\n\nInvoke as: `obsidian://review-md-open?…`\n\nExample: `obsidian://review-md-open?vault=docs&file=designs%2Fdesign.md`",
         "parameters": [
           {
             "name": "vault",
@@ -26,7 +26,7 @@
             "schema": {
               "type": "string"
             },
-            "example": ".dev-vault"
+            "example": "docs"
           },
           {
             "name": "file",
@@ -36,7 +36,7 @@
             "schema": {
               "type": "string"
             },
-            "example": "design.md"
+            "example": "designs/design.md"
           },
           {
             "name": "thread",
@@ -83,7 +83,7 @@
       "get": {
         "operationId": "reply",
         "summary": "Reply to a thread",
-        "description": "Append a message to an existing comment thread stored in the file's frontmatter, then open the file at that thread.\n\nInvoke as: `obsidian://review-md-reply?…`\n\nExample: `obsidian://review-md-reply?vault=.dev-vault&file=design.md&thread=d1a2b3&body=agreed%20%E2%80%94%20let's%20keep%20it%20in%20frontmatter`",
+        "description": "Append a message to an existing comment thread stored in the file's frontmatter, then open the file at that thread.\n\nInvoke as: `obsidian://review-md-reply?…`\n\nExample: `obsidian://review-md-reply?vault=docs&file=designs%2Fdesign.md&thread=d1a2b3&body=agreed%20%E2%80%94%20let's%20keep%20it%20in%20frontmatter`",
         "parameters": [
           {
             "name": "vault",
@@ -93,7 +93,7 @@
             "schema": {
               "type": "string"
             },
-            "example": ".dev-vault"
+            "example": "docs"
           },
           {
             "name": "file",
@@ -103,7 +103,7 @@
             "schema": {
               "type": "string"
             },
-            "example": "design.md"
+            "example": "designs/design.md"
           },
           {
             "name": "thread",

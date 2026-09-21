@@ -4,8 +4,8 @@ description: >-
   Capture feature screenshots and animated GIFs of the review-md Obsidian plugin
   to market it and fill a user-friendly README. Use when asked to screenshot the
   UX/features, record a demo GIF, refresh the README images or marketing assets,
-  or show the plugin in action. Drives the built plugin in .dev-vault two ways —
-  a manual path (Obsidian command IDs) and an x-callback path (obsidian://review-md-*
+  or show the plugin in action. Drives the built plugin in the docs/ dev vault two
+  ways — a manual path (Obsidian command IDs) and an x-callback path (obsidian://review-md-*
   deep links) — via scripts/capture-media.mjs, then stitches GIFs with gifski.
 ---
 
@@ -13,8 +13,8 @@ description: >-
 
 Produce the marketing/README media for this plugin: one crisp, cropped PNG per
 feature and a few short GIFs of the interactions. Everything is driven from the
-repo through `scripts/capture-media.mjs` against the live plugin in `.dev-vault`,
-so a capture is one small, repeatable command — never an ad-hoc heredoc.
+repo through `scripts/capture-media.mjs` against the live plugin in the `docs/` dev
+vault, so a capture is one small, repeatable command — never an ad-hoc heredoc.
 
 The concrete per-feature capture list is the rubric in
 [`shot-list.md`](shot-list.md) next to this file. **Read it at run time** and work
@@ -34,10 +34,10 @@ npm run build && npm run install:dev         # only if doctor flags the plugin a
 node scripts/capture-media.mjs reload        # load the freshly-built bundle into the vault
 ```
 
-`doctor` must be all-`ok` before capturing. Obsidian must be **running with
-`.dev-vault` open** (the harness talks to the live app). Final assets land in
-`docs/media/` — that directory **is committed** (README images have to ship in the
-repo to render on GitHub); the `.dev-vault/` staging copy stays gitignored.
+`doctor` must be all-`ok` before capturing. Obsidian must be **running with the
+`docs/` folder open as a vault** (the harness talks to the live app). Final assets
+land in `docs/media/` — that directory **is committed** (README images have to ship
+in the repo to render on GitHub); the vault config `docs/.obsidian/` stays gitignored.
 
 ## 1. The tool — one subcommand per primitive
 
@@ -79,10 +79,10 @@ node scripts/capture-media.mjs shot --out docs/media/sidebar.png \
 "share / reply by link"):
 
 ```
-node scripts/capture-media.mjs open  --file design.md --thread d1a2b3
+node scripts/capture-media.mjs open  --file designs/design.md --thread d1a2b3
 node scripts/capture-media.mjs shot  --out docs/media/deep-link-open.png \
      --selector '.workspace-leaf-content[data-type="review-md-comments"]' --pad 6 --settle 600
-node scripts/capture-media.mjs reply --file design.md --thread d1a2b3 --body "looks good" --author omar
+node scripts/capture-media.mjs reply --file designs/design.md --thread d1a2b3 --body "looks good" --author omar
 ```
 
 The `open`/`reply` links are the real `obsidian://review-md-*` API (see

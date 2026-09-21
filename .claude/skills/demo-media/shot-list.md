@@ -10,7 +10,7 @@ Setup for every run:
 ```
 export PATH="$HOME/.nvm/versions/node/v22.22.3/bin:$PATH"
 node scripts/capture-media.mjs doctor && node scripts/capture-media.mjs reload
-node scripts/capture-media.mjs open --file design.md            # dogfood doc with live threads
+node scripts/capture-media.mjs open --file designs/design.md     # dogfood doc with live threads
 node scripts/capture-media.mjs cmd  --id review-md:open-comments-view
 ```
 
@@ -25,7 +25,7 @@ Reusable selectors:
 | rendered doc | `.markdown-reading-view` |
 | augmented diagram | `.mermaid:has(.review-md-node-badge)` |
 
-Live threads in `.dev-vault/.design.comments.md`: `d1a2b3` (mermaidNode, committed
+Live threads in `docs/designs/.design.comments.md`: `d1a2b3` (mermaidNode, committed
 `on d3de8c5`), `c0ffee` (mermaidNode, **working copy**), `qklp1y` (mermaidEdge),
 `a7b8c9` (text), `e4f5a6` (no rev). Use these ids below.
 
@@ -77,9 +77,9 @@ Two cards: one `on <commit>`, one **working copy**. Capture the pair.
 The deep-link workflow, driven by the real `obsidian://review-md-*` API.
 - **x-callback:**
   ```
-  open --file design.md --thread d1a2b3
+  open --file designs/design.md --thread d1a2b3
   shot --out docs/media/deep-link-open.png --selector '.workspace-leaf-content[data-type="review-md-comments"]' --pad 6 --settle 700
-  reply --file design.md --thread d1a2b3 --body "confirmed — shipping this" --author omar
+  reply --file designs/design.md --thread d1a2b3 --body "confirmed — shipping this" --author omar
   shot --out docs/media/deep-link-reply.png --selector '.review-md-thread[data-thread-id="d1a2b3"]' --pad 8 --settle 500
   ```
 - **manual equivalent** (copies the same URL to the clipboard):
@@ -104,9 +104,9 @@ Click-to-comment surface appearing. Frames → gif.
 Best single "what is this" GIF: a link opens the file, focuses the thread, a reply lands.
 - ```
   shot  --out docs/media/frames/deeplink/f-000.png --selector '.workspace-leaf-content[data-type="review-md-comments"]'
-  open  --file design.md --thread qklp1y
+  open  --file designs/design.md --thread qklp1y
   shot  --out docs/media/frames/deeplink/f-001.png --selector '.workspace-leaf-content[data-type="review-md-comments"]' --settle 500
-  reply --file design.md --thread qklp1y --body "edge re-anchors on re-layout" --author omar
+  reply --file designs/design.md --thread qklp1y --body "edge re-anchors on re-layout" --author omar
   shot  --out docs/media/frames/deeplink/f-002.png --selector '.workspace-leaf-content[data-type="review-md-comments"]' --settle 500
   gif   --frames docs/media/frames/deeplink --out docs/media/deeplink.gif --fps 3 --width 700
   ```

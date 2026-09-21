@@ -1203,11 +1203,14 @@ export default class ReviewMdPlugin extends Plugin {
     const ctx = await this.gitContext(file);
     if (!ctx) return out;
     // `git log --follow` so renames don't truncate the history; abbreviated shas
-    // match the thread stamps (both use core.abbrev). Oldest→newest via --reverse
-    // so the ordinal is just the 1-based position.
-    const log = await ctx.run(["log", "--follow", "--reverse", "--format=%h", "--", ctx.rel], false);
+    // match the thread stamps (both use core.abbrev). NOTE: `--follow` must NOT be
+    // combined with `--reverse` — git then drops the rename trace and returns only
+    // the tip commit (a known git limitation; silently broke v-numbering the moment
+    // design.md was moved into docs/designs/). So fetch newest→oldest and reverse in
+    // JS; the ordinal is then the 1-based position from the oldest commit.
+    const log = await ctx.run(["log", "--follow", "--format=%h", "--", ctx.rel], false);
     if (!log) return out;
-    const shas = log.split("\n").map((s) => s.trim()).filter(Boolean);
+    const shas = log.split("\n").map((s) => s.trim()).filter(Boolean).reverse();
     shas.forEach((sha, i) => out.set(sha, i + 1));
     return out;
   }

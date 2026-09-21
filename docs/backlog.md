@@ -5,6 +5,14 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
 
 ## Deferred
 
+- ~~**Make `docs/` the tracked Obsidian dev vault so Revisions v-numbers render**~~ —
+  **DONE 2026-09-21.** `git mv design.md → docs/designs/design.md` (history preserved),
+  `docs/` is now the dev vault (config + fixtures gitignored, docs + review sidecars
+  tracked). Exposed and fixed a latent bug: `fileRevisionOrdinals` used `git log
+  --follow --reverse`, which drops the rename trace and returns only the tip commit —
+  `--follow` can't be combined with `--reverse`. Pivot record:
+  [`docs/issues/docs-vault-and-follow-reverse.md`](issues/docs-vault-and-follow-reverse.md).
+
 - ~~**Fix mermaid augment lost on reading-view re-render/scroll**~~ — **DONE 2026-09-21.** The
   researched fix (`ctx.addChild` + lifecycle observer) was disproved empirically: the real root
   cause is that Obsidian's reading view caches sections and does **not** re-run the markdown

@@ -23,7 +23,7 @@ for each thread with rev.git.commit == "working":
 
 ## The deciding constraint: commits happen in the CLI, not Obsidian
 
-review-md's primary workflow (see [design.md](../../design.md#how-its-used--the-primary-workflow)):
+review-md's primary workflow (see [design.md](../designs/design.md#how-its-used--the-primary-workflow)):
 
 - **Editing + committing happen in the CLI** — usually a Claude Code session.
 - **Reviewing happens in Obsidian** — which writes only the sidecar, never commits

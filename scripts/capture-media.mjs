@@ -23,12 +23,12 @@
 //   gif     --frames <dir|glob> --out <gif> [--fps <n>] [--width <n>] [--quality <n>]
 //                                        stitch PNG frames into a GIF via gifski
 //
-// Common flags: --vault <name> (default .dev-vault), --cli <path>, --quiet.
+// Common flags: --vault <name> (default docs), --cli <path>, --quiet.
 //
 // Examples:
 //   node scripts/capture-media.mjs doctor
 //   node scripts/capture-media.mjs cmd --id review-md:toggle-comment-mode
-//   node scripts/capture-media.mjs open --file design.md --thread d1a2b3
+//   node scripts/capture-media.mjs open --file designs/design.md --thread d1a2b3
 //   node scripts/capture-media.mjs shot --out docs/media/sidebar.png \
 //        --selector '.review-md-comments-view' --pad 8 --settle 400
 //   node scripts/capture-media.mjs gif --frames docs/media/frames/comment \
@@ -55,7 +55,7 @@ for (let i = 1; i < argv.length; i++) {
     else { flags[key] = next; i++; }
   }
 }
-const VAULT = flags.vault || ".dev-vault";
+const VAULT = flags.vault || "docs";
 const CLI = flags.cli || process.env.OBSIDIAN_CLI || DEFAULT_CLI;
 const QUIET = !!flags.quiet;
 

@@ -41,6 +41,17 @@ export class CommentsView extends ItemView {
   /** Thread ids whose reviewed body has drifted (outdated) — filled once the
    *  current body hash is known, so a thread can be categorised "hidden". */
   private outdatedIds = new Set<string>();
+  /** The revision the "Revisions" header filter is pinned to: `null` = All,
+   *  else a commit sha (or WORKING_REV) — only threads authored against it show. */
+  private revisionFilter: string | null = null;
+  /** Distinct authoring revisions present in the current file's threads, newest
+   *  first, as `{ key, label }` — the "Revisions" dropdown's items. Filled async
+   *  by refreshRevisions() once git version numbers resolve. */
+  private revisions: { key: string; label: string }[] = [];
+  /** Live refs to the header dropdown so refreshRevisions()/setRevisionFilter()
+   *  can repaint its label + active state without a full re-render. */
+  private revFilterBtn: HTMLButtonElement | null = null;
+  private revFilterLabelEl: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: ReviewMdPlugin) {
     super(leaf);
@@ -89,6 +100,8 @@ export class CommentsView extends ItemView {
       // Leaving a file abandons any thread there we never gave a first comment.
       const prev = this.file;
       this.file = next;
+      // A revision is meaningful only within its file — reset the filter on switch.
+      this.revisionFilter = null;
       if (prev && prev !== next) void this.plugin.pruneEmptyThreads(prev);
     }
     void this.refresh();
@@ -158,6 +171,20 @@ export class CommentsView extends ItemView {
     // toggles whether its category of cards is shown; all on by default. Counts
     // + the "hidden" (drifted) split are finalised in fillVersionRows() once the
     // body hash is known — chips are (re)built by refreshChips() from there.
+    // "Revisions" filter — a dropdown that pins the list to comments authored
+    // against one revision (All by default). Leads the controls row, ahead of the
+    // status chips; its items (v7 (sha), v6 …) are filled async by refreshRevisions().
+    const revBtn = header.createEl("button", {
+      cls: "review-md-rev-filter",
+      attr: { "aria-label": "Filter comments by revision" },
+    });
+    setIcon(revBtn.createSpan({ cls: "review-md-rev-filter-icon" }), "history");
+    this.revFilterLabelEl = revBtn.createSpan({ cls: "review-md-rev-filter-label", text: "Revisions" });
+    setIcon(revBtn.createSpan({ cls: "review-md-rev-filter-caret" }), "chevron-down");
+    revBtn.onclick = (e) => this.showRevisionMenu(e);
+    this.revFilterBtn = revBtn;
+    void this.refreshRevisions();
+
     const chips = header.createDiv({ cls: "review-md-chips" });
     for (const cat of CATEGORY_ORDER) {
       const chip = chips.createEl("button", { cls: "review-md-chip", attr: { "data-cat": cat } });
@@ -211,8 +238,97 @@ export class CommentsView extends ItemView {
     this.contentEl.querySelectorAll<HTMLElement>(".review-md-thread").forEach((card) => {
       const t = card.dataset.threadId ? this.threads.find((x) => x.id === card.dataset.threadId) : undefined;
       if (!t) return;
-      card.toggleClass("is-filtered-out", !this.activeFilters.has(this.categoryOf(t)));
+      const visible = this.activeFilters.has(this.categoryOf(t)) && this.matchesRevision(t);
+      card.toggleClass("is-filtered-out", !visible);
     });
+  }
+
+  /** Identity of the revision a thread was authored against — the SAME value the
+   *  card's version stamp shows (fillVersionRows): a git commit (incl. WORKING_REV)
+   *  when the file was tracked, else the body-hash. `null` for an unstamped thread. */
+  private revKeyOf(thread: ReviewThread): string | null {
+    const rev = thread.rev;
+    if (!rev) return null;
+    if (rev.git?.commit) return rev.git.commit;
+    if (rev.bodyHash) return rev.bodyHash;
+    return null;
+  }
+
+  /** Human label for a revision key: "Working copy", a git version number
+   *  (`v7 (b24cd88)`), or the bare body-hash slug when there's no git ordinal. */
+  private revLabelFor(key: string, ordinals: Map<string, number>): string {
+    if (key === WORKING_REV) return "Working copy";
+    const v = ordinals.get(key);
+    return v ? `v${v} (${key.slice(0, 7)})` : key.slice(0, 7);
+  }
+
+  /** True when a thread passes the active revision filter (All ⇒ always). */
+  private matchesRevision(thread: ReviewThread): boolean {
+    if (this.revisionFilter === null) return true;
+    return this.revKeyOf(thread) === this.revisionFilter;
+  }
+
+  /** Open the Revisions dropdown: All + one entry per authoring revision, the
+   *  current selection checked. */
+  private showRevisionMenu(e: MouseEvent): void {
+    const menu = new Menu();
+    menu.addItem((i) =>
+      i.setTitle("All").setChecked(this.revisionFilter === null).onClick(() => this.setRevisionFilter(null)),
+    );
+    for (const r of this.revisions) {
+      menu.addItem((i) =>
+        i.setTitle(r.label).setChecked(this.revisionFilter === r.key).onClick(() => this.setRevisionFilter(r.key)),
+      );
+    }
+    menu.showAtMouseEvent(e);
+  }
+
+  /** Pin (or clear) the revision filter and repaint. */
+  private setRevisionFilter(key: string | null): void {
+    this.revisionFilter = key;
+    this.updateRevFilterLabel();
+    this.applyFilter();
+  }
+
+  /** Reflect the current selection on the header button: "Revisions" when All,
+   *  "Revisions · <label>" plus an accent when pinned to one revision. */
+  private updateRevFilterLabel(): void {
+    if (!this.revFilterLabelEl || !this.revFilterBtn) return;
+    const active = this.revisions.find((r) => r.key === this.revisionFilter);
+    this.revFilterLabelEl.setText(active ? `Revisions · ${active.label}` : "Revisions");
+    this.revFilterBtn.toggleClass("is-active", this.revisionFilter !== null);
+  }
+
+  /** Gather the distinct revisions the current file's comments were authored
+   *  against, newest first, and label them with git version numbers (`v7 (sha)`,
+   *  or "Working copy" for uncommitted). Async: needs `git log` for the numbers. */
+  private async refreshRevisions(): Promise<void> {
+    if (!this.file) {
+      this.revisions = [];
+      this.updateRevFilterLabel();
+      return;
+    }
+    // Distinct authoring revisions present across the file's threads.
+    const keys: string[] = [];
+    const seen = new Set<string>();
+    for (const t of this.threads) {
+      const k = this.revKeyOf(t);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      keys.push(k);
+    }
+    const ordinals = await this.plugin.fileRevisionOrdinals(this.file);
+    // Newest first: the uncommitted working copy on top, then git commits by
+    // version number descending, then any body-hash-only stamps (no ordinal) last.
+    const rank = (k: string) => (k === WORKING_REV ? Infinity : (ordinals.get(k) ?? 0));
+    keys.sort((a, b) => rank(b) - rank(a));
+    this.revisions = keys.map((k) => ({ key: k, label: this.revLabelFor(k, ordinals) }));
+    // A pinned revision that no longer exists (file switch race) falls back to All.
+    if (this.revisionFilter !== null && !this.revisions.some((r) => r.key === this.revisionFilter)) {
+      this.revisionFilter = null;
+    }
+    this.updateRevFilterLabel();
+    this.applyFilter();
   }
 
   /** One thread card: anchor line, messages, controls, reply box. */

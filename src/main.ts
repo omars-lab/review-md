@@ -1190,6 +1190,29 @@ export default class ReviewMdPlugin extends Plugin {
   }
 
   /**
+   * Version number for each commit that ever touched `file`, keyed by the same
+   * abbreviated sha the thread stamps use (`--abbrev-commit`). The file's whole
+   * history is numbered newest-first: the latest commit that touched it is the
+   * highest `v` (so `v7` reads as "the 7th and newest version"), the first commit
+   * is `v1`. The comments sidebar turns these into the "Revisions" filter labels
+   * (`v7 (b24cd88)`); a commit with no comments simply never appears there. Empty
+   * map when there's no git work tree / Node access (mobile).
+   */
+  async fileRevisionOrdinals(file: TFile): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    const ctx = await this.gitContext(file);
+    if (!ctx) return out;
+    // `git log --follow` so renames don't truncate the history; abbreviated shas
+    // match the thread stamps (both use core.abbrev). Oldest→newest via --reverse
+    // so the ordinal is just the 1-based position.
+    const log = await ctx.run(["log", "--follow", "--reverse", "--format=%h", "--", ctx.rel], false);
+    if (!log) return out;
+    const shas = log.split("\n").map((s) => s.trim()).filter(Boolean);
+    shas.forEach((sha, i) => out.set(sha, i + 1));
+    return out;
+  }
+
+  /**
    * Is a thread stale? Per-anchor: a thread is "outdated" only when the content IT
    * anchors to changed or was removed since it was authored — an edit to an
    * unrelated part of the file leaves it current (Omar, 2026-09-21: "unless on our

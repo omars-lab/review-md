@@ -1,5 +1,5 @@
 # review-md — one target per check; CI calls these same targets (local == CI parity).
-.PHONY: help install hooks build dev typecheck secrets secrets-all precommit check api-docs api-check reanchor
+.PHONY: help install hooks build dev typecheck secrets secrets-all precommit check api-docs api-check reanchor validate validate-fix
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -36,6 +36,12 @@ api-check: ## Fail if docs/api/* are stale vs the schema (what the pre-commit ho
 reanchor: ## Re-anchor working-copy comment threads to their commit (what the post-commit hook runs)
 	node scripts/reanchor-comments.mjs
 
+validate: ## Schema-check every comment sidecar (what the pre-commit hook runs)
+	node scripts/validate-comments.mjs
+
+validate-fix: ## Auto-repair sidecar metadata (re-quote numeric hash fields), then report
+	node scripts/validate-comments.mjs --fix
+
 precommit: ## Run all pre-commit hooks against all files
 	pre-commit run --all-files
 
@@ -44,4 +50,4 @@ env-restore: ## Restore .env.keys from LastPass (requires `lpass login`)
 		"$$(lpass show 'dotenvx/review-md/DOTENV_PRIVATE_KEY' --password | tr -d '\r\n')" \
 		> .env.keys && chmod 600 .env.keys && echo "restored .env.keys from LastPass (chmod 600)"
 
-check: typecheck api-check secrets-all ## Run the full local gate
+check: typecheck api-check validate secrets-all ## Run the full local gate

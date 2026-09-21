@@ -11,6 +11,26 @@ import {
 } from "obsidian";
 import xcallbackSchema from "./protocol/xcallback.schema.json";
 import { CommentsView, VIEW_TYPE_COMMENTS } from "./views/comments-view";
+import {
+  WORKING_REV,
+  stripFrontmatter,
+  stripBlockIds,
+  removeBlockIdFromText,
+  blockTextFor,
+  sha256Short,
+  bodyHash,
+  ordinalsFromLog,
+} from "./pure";
+
+// Re-export the pure helpers other modules and tests still import from here, so
+// their identity stays single-sourced in ./pure.
+export {
+  WORKING_REV,
+  stripFrontmatter,
+  stripBlockIds,
+  removeBlockIdFromText,
+  blockTextFor,
+} from "./pure";
 
 interface XcallbackParam {
   name: string;
@@ -81,13 +101,6 @@ export interface ReviewRev {
   ts: string;
   git?: { commit: string; blob: string };
 }
-/**
- * Sentinel `rev.git.commit` for a comment left on the *uncommitted working copy*
- * of a file (its body differs from the committed blob at authoring time). A
- * post-commit hook re-anchors such threads to the real commit sha once the file
- * is committed. See docs/issues/version-stamping.md.
- */
-export const WORKING_REV = "working";
 export interface ReviewThread {
   id: string;
   anchor: Record<string, unknown>;
@@ -126,76 +139,12 @@ function nodeRequire(mod: string): any {
   }
 }
 
-/** Strip a leading YAML frontmatter block so we hash only the reviewed body.
- *  The middle is optional so an empty block (`---\n---`) is stripped too, not
- *  hashed as body. */
-export function stripFrontmatter(text: string): string {
-  if (!text.startsWith("---")) return text;
-  const m = text.match(/^---\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*\r?\n?/);
-  return m ? text.slice(m[0].length) : text;
-}
-
-/**
- * Strip Obsidian block-id markers (`^id`) so they don't count toward the content
- * hash: they're anchoring scaffolding review-md writes, not reviewed prose, so
- * adding/removing an anchor must not change `bodyHash`. Matches a trailing ` ^id`
- * at a line's end and a standalone `^id` line. Deliberately broad (any block id,
- * not only ours) — a block id is structural metadata by nature.
- */
-export function stripBlockIds(text: string): string {
-  return text
-    .replace(/[ \t]+\^[A-Za-z0-9_-]+[ \t]*$/gm, "")
-    .replace(/^\^[A-Za-z0-9_-]+[ \t]*$/gm, "");
-}
-
-/**
- * Remove one specific block id from source text: a trailing ` ^id` on a block's
- * line, or a standalone `^id` line (with its blank line). Used to clean up when a
- * thread that owned the id is deleted and no other thread references it.
- */
-export function removeBlockIdFromText(text: string, blockId: string): string {
-  const esc = blockId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return text
-    .replace(new RegExp(`[ \\t]+\\^${esc}(?=[ \\t]*$)`, "gm"), "")
-    .replace(new RegExp(`^\\^${esc}[ \\t]*\\r?\\n?`, "gm"), "");
-}
-
-/**
- * The text of the block bearing `^blockId`, with the id marker stripped, or null
- * if the id isn't present in `text`. A "block" is the run of consecutive non-blank
- * lines around the id line (stopping at a blank line or a code fence) — the same
- * unit a text anchor points at. Used by the per-anchor staleness check to read
- * just the anchored block's current content from the latest file.
- */
-export function blockTextFor(text: string, blockId: string): string | null {
-  const esc = blockId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const idRe = new RegExp(`(^|\\s)\\^${esc}[ \\t]*$`);
-  const lines = text.split(/\r?\n/);
-  const idx = lines.findIndex((l) => idRe.test(l));
-  if (idx < 0) return null;
-  const fence = (l: string) => /^[ \t]*`{3,}/.test(l);
-  let start = idx;
-  let end = idx;
-  while (start > 0 && lines[start - 1].trim() !== "" && !fence(lines[start - 1])) start--;
-  while (end + 1 < lines.length && lines[end + 1].trim() !== "" && !fence(lines[end + 1])) end++;
-  return removeBlockIdFromText(lines.slice(start, end + 1).join("\n"), blockId).trim();
-}
-
 /** Alternation of every mermaid node shape wrapper (`[..]`, `(..)`, `([..])`, …),
  *  longest-first so `[[..]]` wins over `[..]`. Used to pull a node's declared
  *  shape+label out of diagram source. Kept in one place — the preview builders and
  *  the per-anchor staleness check must read node declarations identically. */
 const MERMAID_SHAPES =
   "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
-
-/** Short hex sha256 of a string (Web Crypto — available in the renderer). */
-async function sha256Short(text: string, len = 12): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-    .slice(0, len);
-}
 
 const POC4_BODIES = [
   "why radial here? seems arbitrary",
@@ -1021,7 +970,7 @@ export default class ReviewMdPlugin extends Plugin {
    *  flip this or any other thread to "outdated". See docs/issues/durable-anchoring.md. */
   async bodyHashFor(file: TFile): Promise<string> {
     const text = await this.app.vault.read(file);
-    return sha256Short(stripBlockIds(stripFrontmatter(text)));
+    return bodyHash(text);
   }
 
   /**
@@ -1212,9 +1161,7 @@ export default class ReviewMdPlugin extends Plugin {
     // JS; the ordinal is then the 1-based position from the oldest commit.
     const log = await ctx.run(["log", "--follow", "--format=%h", "--", ctx.rel], false);
     if (!log) return out;
-    const shas = log.split("\n").map((s) => s.trim()).filter(Boolean).reverse();
-    shas.forEach((sha, i) => out.set(sha, i + 1));
-    return out;
+    return ordinalsFromLog(log);
   }
 
   /**

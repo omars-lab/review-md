@@ -1,7 +1,13 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice, setIcon, Menu } from "obsidian";
 import type ReviewMdPlugin from "../main";
-import { WORKING_REV } from "../main";
 import type { ReviewThread } from "../main";
+import {
+  WORKING_REV,
+  revKeyOf,
+  revLabelFor,
+  snippetAround,
+  middleEllipsis,
+} from "../pure";
 
 export const VIEW_TYPE_COMMENTS = "review-md-comments";
 
@@ -252,19 +258,7 @@ export class CommentsView extends ItemView {
    *  card's version stamp shows (fillVersionRows): a git commit (incl. WORKING_REV)
    *  when the file was tracked, else the body-hash. `null` for an unstamped thread. */
   private revKeyOf(thread: ReviewThread): string | null {
-    const rev = thread.rev;
-    if (!rev) return null;
-    if (rev.git?.commit) return rev.git.commit;
-    if (rev.bodyHash) return rev.bodyHash;
-    return null;
-  }
-
-  /** Human label for a revision key: "Working copy", a git version number
-   *  (`v7 (b24cd88)`), or the bare body-hash slug when there's no git ordinal. */
-  private revLabelFor(key: string, ordinals: Map<string, number>): string {
-    if (key === WORKING_REV) return "Working copy";
-    const v = ordinals.get(key);
-    return v ? `v${v} (${key.slice(0, 7)})` : key.slice(0, 7);
+    return revKeyOf(thread.rev);
   }
 
   /** True when a thread passes the active revision filter (All ⇒ always). */
@@ -327,7 +321,7 @@ export class CommentsView extends ItemView {
     // version number descending, then any body-hash-only stamps (no ordinal) last.
     const rank = (k: string) => (k === WORKING_REV ? Infinity : (ordinals.get(k) ?? 0));
     keys.sort((a, b) => rank(b) - rank(a));
-    this.revisions = keys.map((k) => ({ key: k, label: this.revLabelFor(k, ordinals) }));
+    this.revisions = keys.map((k) => ({ key: k, label: revLabelFor(k, ordinals) }));
     // A pinned revision that no longer exists (file switch race) falls back to All.
     if (this.revisionFilter !== null && !this.revisions.some((r) => r.key === this.revisionFilter)) {
       this.revisionFilter = null;
@@ -707,22 +701,6 @@ function labeledButton(parent: HTMLElement, icon: string, label: string, cls?: s
   return b;
 }
 
-/**
- * A readable window of the reviewed body: centred on the anchor quote when it's
- * still present, else the opening lines. Keeps the panel from dumping a whole file.
- */
-function snippetAround(body: string, quote: string, radius = 240): string {
-  const q = quote.trim().slice(0, 60);
-  const at = q ? body.indexOf(q) : -1;
-  if (at === -1) {
-    const head = body.trim().slice(0, radius * 2);
-    return body.length > head.length ? `${head}…` : head;
-  }
-  const start = Math.max(0, at - radius);
-  const end = Math.min(body.length, at + q.length + radius);
-  return `${start > 0 ? "…" : ""}${body.slice(start, end).trim()}${end < body.length ? "…" : ""}`;
-}
-
 /** Short content-type label for the card's type badge. */
 function anchorTypeLabel(anchor: Record<string, unknown>): string {
   switch (String(anchor?.type ?? "unknown")) {
@@ -755,13 +733,6 @@ function describeAnchor(anchor: Record<string, unknown>): string {
   return type;
 }
 
-/** Elide the middle of a long string: "start … end", keeping both ends visible. */
-function middleEllipsis(s: string, max = 180): string {
-  if (s.length <= max) return s;
-  const head = Math.ceil((max - 3) * 0.6);
-  const tail = Math.floor((max - 3) * 0.4);
-  return `${s.slice(0, head).trimEnd()} … ${s.slice(s.length - tail).trimStart()}`;
-}
 
 /** Compact timestamp for display; falls back to the raw string if unparseable. */
 function formatTs(ts: string): string {

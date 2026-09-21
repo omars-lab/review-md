@@ -36,6 +36,18 @@ repos:
         language: system
         files: '(^|/)\.[^/]+\.comments\.md$'
 
+      # Unit tests for the obsidian-free pure layer (src/pure.ts) — the hashing,
+      # revision-labelling and text-window logic. Runs on any staged src/ or test/
+      # change so a regression trips at commit time, not in a live review. Node
+      # strips the `.ts` natively (needs Node >= 22.6; .nvmrc pins 22.22.3). Same
+      # command as `make test`. See test/pure.test.ts.
+      - id: unit-tests
+        name: unit tests — pure review-md logic (node --test)
+        entry: node --test test/**/*.test.ts
+        language: system
+        pass_filenames: false
+        files: '^(src/|test/).*\.ts$'
+
       # post-commit stage: after a commit lands, re-anchor any working-copy comment
       # threads whose reviewed file was just committed (WORKING_REV → real commit).
       # The reviewed file is committed in the CLI, not Obsidian, so this runs here

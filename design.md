@@ -21,6 +21,26 @@ and threads are shareable/repliable via
 `review-md-open`, `review-md-reply`) is documented in [`docs/api/`](docs/api/xcallback.md)
 — generated from `src/protocol/xcallback.schema.json` and kept in sync by a pre-commit hook.
 
+## How it's used — the primary workflow
+
+review-md assumes a **split workflow**, and its design follows from it:
+
+- **Editing and committing happen in the CLI** — typically a Claude Code session
+  (or a plain terminal). The developer changes the files and runs `git commit`
+  there. **Commits never originate in Obsidian.**
+- **Reviewing happens in Obsidian** — the reviewer opens the doc in the review-md
+  reviewer, drops threads, replies, resolves. Obsidian is read-mostly for the
+  artifact itself; it writes only the sidecar.
+
+Two consequences shape the version-tracking design:
+
+1. Because the reviewer can comment on work the CLI hasn't committed yet, a thread
+   can be authored against the **uncommitted working copy** (use case 9).
+2. Because the *commit* fires in the CLI — with Obsidian possibly closed and the
+   plugin not running — the step that re-anchors those working threads to the
+   landed commit must run **at git-commit time**, as a **post-commit hook**, not
+   inside the plugin. See [Version tracking](#version-tracking).
+
 ## Use cases — what the tool powers
 
 The complete set of things a reviewer can do with review-md today, each backed by a
@@ -46,9 +66,11 @@ section below or an issue note under [`docs/issues/`](docs/issues/):
 8. **Version-stamped review** — each thread records the artifact version it was made
    against, is flagged **outdated** when the reviewed text drifts, and can recover the
    exact reviewed text via git. See [Version tracking](#version-tracking).
-9. **Review before commit** — comment on the uncommitted **working copy**; a
-   post-commit hook re-anchors those threads to the commit once the file lands
-   (tasks #41–#42).
+9. **Review before commit** — comment on the uncommitted **working copy** in
+   Obsidian; when the CLI later commits the file, a **post-commit hook** re-anchors
+   those threads to the landed commit (tasks #41–#42). The hook — not the plugin —
+   owns this step, because the commit happens in the CLI with Obsidian possibly
+   closed.
 10. **Triage the sidebar** — cards carry a content-type badge and version stamp;
     header **filter chips** (open / hidden / resolved) narrow the list. See
     [Reviewer sidebar](#reviewer-sidebar).
@@ -137,8 +159,15 @@ drifts, and recover the exact reviewed text. The model has three parts:
   retrieval only, never staleness.
 - **Working copy → commit re-anchor.** A thread authored against the uncommitted
   working tree is stamped with the `WORKING_REV` sentinel and shown as **"working
-  copy"**. A post-commit hook re-anchors those threads to the commit that lands the
-  file, swapping `WORKING_REV` for the real `git.commit`/`git.blob` (tasks #41–#42).
+  copy"**, recording the working-tree blob (`git hash-object`). When the CLI later
+  commits the file, a **post-commit hook** (installed via `make hooks`, run by the
+  pre-commit framework) re-anchors those threads: for each `WORKING_REV` thread it
+  matches the recorded blob against `HEAD:<reviewed-path>`, and on a match swaps
+  `WORKING_REV` for the real last-touching `git.commit` (the blob is already
+  identical). The re-anchored sidecar is left as a working change for the same CLI
+  session to commit. The hook — not the plugin — owns this because the commit fires
+  in the CLI (tasks #41–#42). See
+  [`docs/issues/reanchor-hook.md`](docs/issues/reanchor-hook.md).
 
 ```mermaid
 flowchart LR

@@ -102,11 +102,15 @@ blob is stable and `git show <commit>:<path>` still recovers the exact text.
 
 A file can be commented on before its latest edits are committed. In that state
 there is no last-touching commit for the *current* body, so the thread is stamped
-with the `WORKING_REV` sentinel (`"working"`) instead of a `git.commit`, and the
-sidebar shows **"working copy"** rather than `on <commit>`. On the next commit that
-touches the file, a post-commit hook re-anchors those working threads to the new
-commit (see the design doc + backlog). `bodyHash` still carries staleness in the
-working state exactly as for committed threads.
+with the `WORKING_REV` sentinel (`"working"`) instead of a `git.commit` — but the
+working-tree blob (`git hash-object`) *is* recorded, since that's the key the
+re-anchor step matches on. The sidebar shows **"working copy"** rather than
+`on <commit>`. Because the commit fires in the CLI (not Obsidian), re-anchoring
+runs as a **post-commit hook**, not in the plugin: on the commit that lands the
+file it swaps `WORKING_REV` for the real last-touching commit once the recorded
+blob matches `HEAD:<path>`. See [reanchor-hook.md](reanchor-hook.md) for the full
+options evaluation. `bodyHash` still carries staleness in the working state exactly
+as for committed threads.
 
 ## Robustness
 

@@ -126,10 +126,12 @@ function nodeRequire(mod: string): any {
   }
 }
 
-/** Strip a leading YAML frontmatter block so we hash only the reviewed body. */
+/** Strip a leading YAML frontmatter block so we hash only the reviewed body.
+ *  The middle is optional so an empty block (`---\n---`) is stripped too, not
+ *  hashed as body. */
 export function stripFrontmatter(text: string): string {
   if (!text.startsWith("---")) return text;
-  const m = text.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
+  const m = text.match(/^---\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*\r?\n?/);
   return m ? text.slice(m[0].length) : text;
 }
 

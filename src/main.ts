@@ -924,20 +924,32 @@ export default class ReviewMdPlugin extends Plugin {
   }
 
   /**
-   * The short HEAD commit and committed blob (`HEAD:<relpath>`) for a file, or
-   * null when there's no git work tree / the file isn't committed / no Node
-   * access (mobile). Uses the committed blob (not the working tree) so the stamp
-   * is stable as more comments are added to the frontmatter. Each git call has a
-   * short timeout so a slow/hung repo can't freeze thread creation.
+   * The commit + blob a comment is stamped against, or null when there's no git
+   * work tree / the file isn't committed / no Node access (mobile). Each git call
+   * has a short timeout so a slow/hung repo can't freeze thread creation.
+   *
+   * Two cases:
+   * - **Working copy dirty** (uncommitted edits to this file): the reviewed body
+   *   isn't in any commit yet, so stamp `commit = WORKING_REV` and record the
+   *   working-tree blob (`git hash-object`). A post-commit hook later re-anchors
+   *   the thread to the real commit whose `HEAD:<path>` blob equals this one.
+   * - **Clean**: the version is the last commit that actually TOUCHED this file,
+   *   not HEAD — unrelated commits don't produce a new version of the reviewed doc
+   *   (Omar, 2026-09-21). The blob at that commit equals HEAD's blob (nothing
+   *   changed the file since), so `git show <commit>:<path>` retrieval is consistent.
    */
   async gitRevFor(file: TFile): Promise<{ commit: string; blob: string } | null> {
     const ctx = await this.gitContext(file);
     if (!ctx) return null;
-    // The version is the last commit that actually TOUCHED this file, not HEAD —
-    // unrelated commits don't produce a new version of the reviewed doc (Omar,
-    // 2026-09-21). `rev-list -1 HEAD -- <path>` is that commit; the blob at that
-    // commit equals HEAD's blob (nothing changed the file since), so retrieval
-    // via `git show <commit>:<path>` stays consistent.
+    // Uncommitted edits to this file? `status --porcelain -- <path>` is non-empty
+    // for modified/staged/untracked. Then the reviewed body lives only in the
+    // working tree — stamp WORKING_REV + the working blob for the re-anchor hook.
+    const status = await ctx.run(["status", "--porcelain", "--", ctx.rel]);
+    if (status) {
+      const workBlob = await ctx.run(["hash-object", "--", ctx.rel]);
+      if (workBlob) return { commit: WORKING_REV, blob: workBlob };
+      return null; // couldn't hash (e.g. deleted) → fall back to git-agnostic path
+    }
     const commit = await ctx.run(["rev-list", "-1", "--abbrev-commit", "HEAD", "--", ctx.rel]);
     const blob = await ctx.run(["rev-parse", `HEAD:${ctx.rel}`]);
     if (!commit || !blob) return null; // untracked / no commits → git-agnostic path
@@ -958,10 +970,19 @@ export default class ReviewMdPlugin extends Plugin {
    * The reviewed version's body (frontmatter stripped) via
    * `git show <commit>:<relpath>`, or null when there's no git stamp / retrieval
    * fails. The sidebar falls back to the stored anchor quote in that case.
+   *
+   * A WORKING_REV thread was reviewed against the uncommitted working tree, which
+   * isn't in any commit. While it's still current (not outdated) the working tree
+   * *is* the reviewed body, so read the file; once it drifts that content is gone
+   * (it was never committed) → null, and the sidebar shows the stored quote.
    */
   async reviewedBodyFor(file: TFile, thread: ReviewThread): Promise<string | null> {
     const commit = thread.rev?.git?.commit;
     if (!commit) return null;
+    if (commit === WORKING_REV) {
+      if (await this.isThreadOutdated(file, thread)) return null;
+      return stripFrontmatter(await this.app.vault.read(file));
+    }
     const ctx = await this.gitContext(file);
     if (!ctx) return null;
     const out = await ctx.run(["show", `${commit}:${ctx.rel}`], false);

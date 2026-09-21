@@ -397,7 +397,7 @@ export class CommentsView extends ItemView {
       const version = working ? "working copy" : (rev.git?.commit ?? rev.bodyHash.slice(0, 7));
       const stamp = slot.createSpan({ cls: "review-md-rev-base" });
       setIcon(stamp.createSpan({ cls: "review-md-rev-icon" }), working ? "git-branch" : "git-commit");
-      stamp.createSpan({ text: ` on ${version}` });
+      stamp.createSpan({ text: working ? ` ${version}` : ` on ${version}` });
       stamp.title = working
         ? "Comment made on the uncommitted working copy; re-anchors to a commit when the file is committed"
         : `Comment made on version ${version}`;

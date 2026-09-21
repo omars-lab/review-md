@@ -5,6 +5,17 @@ import type { ReviewThread } from "../main";
 
 export const VIEW_TYPE_COMMENTS = "review-md-comments";
 
+/** A thread's display status. `hidden` = its anchored version text has drifted
+ *  (outdated), so it may no longer resolve in the doc. Partitioned by priority
+ *  resolved > hidden > open, so the header counts sum to the total. */
+type ThreadCategory = "open" | "hidden" | "resolved";
+const CATEGORY_ORDER: ThreadCategory[] = ["open", "hidden", "resolved"];
+const CATEGORY_ICON: Record<ThreadCategory, string> = {
+  open: "message-circle",
+  hidden: "eye-off",
+  resolved: "check",
+};
+
 /**
  * The comments sidebar: lists the active file's threads (loaded from its sibling
  * `.<name>.comments.md` sidecar via the plugin), each as a card of messages with
@@ -25,6 +36,11 @@ export class CommentsView extends ItemView {
   /** The thread the user last selected (clicked/focused) — target of the
    *  command-palette copy-link commands. */
   private focusedThreadId: string | null = null;
+  /** Which status categories are visible; toggled by the header filter chips. */
+  private activeFilters = new Set<ThreadCategory>(["open", "hidden", "resolved"]);
+  /** Thread ids whose reviewed body has drifted (outdated) — filled once the
+   *  current body hash is known, so a thread can be categorised "hidden". */
+  private outdatedIds = new Set<string>();
 
   constructor(leaf: WorkspaceLeaf, plugin: ReviewMdPlugin) {
     super(leaf);
@@ -143,14 +159,22 @@ export class CommentsView extends ItemView {
     const header = root.createDiv({ cls: "review-md-header" });
     header.createEl("h3", { text: this.file.basename });
     const threads = this.threads;
-    // Break the count down by status ("4 open, 1 resolved") rather than a bare
-    // total — the open figure is what a reviewer acts on.
-    const resolved = threads.filter((t) => t.resolved).length;
-    const open = threads.length - resolved;
-    const parts: string[] = [];
-    if (open || !resolved) parts.push(`${open} open`);
-    if (resolved) parts.push(`${resolved} resolved`);
-    header.createEl("span", { cls: "review-md-count", text: parts.join(", ") });
+
+    // Status counts as clickable filter chips (open / hidden / resolved). Each
+    // toggles whether its category of cards is shown; all on by default. Counts
+    // + the "hidden" (drifted) split are finalised in fillVersionRows() once the
+    // body hash is known — chips are (re)built by refreshChips() from there.
+    const chips = header.createDiv({ cls: "review-md-chips" });
+    for (const cat of CATEGORY_ORDER) {
+      const chip = chips.createEl("button", { cls: "review-md-chip", attr: { "data-cat": cat } });
+      setIcon(chip.createSpan({ cls: "review-md-chip-icon" }), CATEGORY_ICON[cat]);
+      chip.createSpan({ cls: "review-md-chip-label" });
+      chip.onclick = () => {
+        if (this.activeFilters.has(cat)) this.activeFilters.delete(cat);
+        else this.activeFilters.add(cat);
+        this.applyFilter();
+      };
+    }
 
     if (threads.length === 0) {
       root.createEl("p", {
@@ -163,6 +187,38 @@ export class CommentsView extends ItemView {
     // Open threads first, then resolved ones.
     const ordered = [...threads].sort((a, b) => Number(a.resolved) - Number(b.resolved));
     for (const thread of ordered) this.renderThread(root, thread);
+    // Paint chips + card visibility now (outdated set may still be empty; the
+    // async body-hash pass re-runs this with the drift known).
+    this.applyFilter();
+  }
+
+  /** The display category for a thread: resolved > hidden(drifted) > open. */
+  private categoryOf(thread: ReviewThread): ThreadCategory {
+    if (thread.resolved) return "resolved";
+    if (this.outdatedIds.has(thread.id)) return "hidden";
+    return "open";
+  }
+
+  /** Recompute chip counts + active styling and show/hide cards per the filter. */
+  private applyFilter(): void {
+    const counts: Record<ThreadCategory, number> = { open: 0, hidden: 0, resolved: 0 };
+    for (const t of this.threads) counts[this.categoryOf(t)]++;
+
+    this.contentEl.querySelectorAll<HTMLElement>(".review-md-chip").forEach((chip) => {
+      const cat = chip.dataset.cat as ThreadCategory | undefined;
+      if (!cat) return;
+      const label = chip.querySelector<HTMLElement>(".review-md-chip-label");
+      if (label) label.setText(`${counts[cat]} ${cat}`);
+      chip.toggleClass("is-active", this.activeFilters.has(cat));
+      // A zero-count category can't be toggled to anything useful.
+      chip.toggleClass("is-empty", counts[cat] === 0);
+    });
+
+    this.contentEl.querySelectorAll<HTMLElement>(".review-md-thread").forEach((card) => {
+      const t = card.dataset.threadId ? this.threads.find((x) => x.id === card.dataset.threadId) : undefined;
+      if (!t) return;
+      card.toggleClass("is-filtered-out", !this.activeFilters.has(this.categoryOf(t)));
+    });
   }
 
   /** One thread card: anchor line, messages, controls, reply box. */
@@ -315,6 +371,13 @@ export class CommentsView extends ItemView {
    */
   private fillVersionRows(): void {
     if (!this.file) return;
+    // Recompute which threads have drifted, so categoryOf() can mark them
+    // "hidden" and the chips/filter reflect it.
+    this.outdatedIds = new Set(
+      this.threads
+        .filter((t) => t.rev?.bodyHash && this.bodyHash != null && t.rev.bodyHash !== this.bodyHash)
+        .map((t) => t.id),
+    );
     const byId = new Map(this.threads.map((t) => [t.id, t]));
     this.contentEl.querySelectorAll<HTMLElement>(".review-md-thread").forEach((card) => {
       const id = card.dataset.threadId;
@@ -340,7 +403,7 @@ export class CommentsView extends ItemView {
         : `Comment made on version ${version}`;
 
       // Only when the reviewed body has since diverged: an outdated warning.
-      if (this.bodyHash != null && rev.bodyHash !== this.bodyHash) {
+      if (this.outdatedIds.has(thread.id)) {
         const badge = slot.createSpan({ cls: "review-md-outdated" });
         setIcon(badge, "alert-triangle");
         badge.createSpan({ text: "outdated" });
@@ -350,6 +413,8 @@ export class CommentsView extends ItemView {
       const show = labeledButton(slot, "history", "Show reviewed version", "review-md-show-rev");
       show.onclick = () => void this.showReviewedVersion(thread, card);
     });
+    // Drift is now known — repaint chip counts + apply the filter.
+    this.applyFilter();
   }
 
   /** Toggle an inline panel showing the text as it was when the comment was made. */

@@ -16,7 +16,8 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--size-4-2);
+  flex-wrap: wrap;
+  gap: var(--size-2-2) var(--size-4-2);
   position: sticky;
   top: 0;
   /* Sit above the thread cards, which come later in the DOM and would
@@ -30,6 +31,9 @@
 }
 .review-md-header h3 {
   margin: 0;
+  /* Take the whole first row so the chips wrap onto their own line below,
+     rather than squeezing the file name to an ellipsis in a narrow sidebar. */
+  flex: 1 1 100%;
   font-size: var(--font-ui-medium);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -39,6 +43,61 @@
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   flex: 0 0 auto;
+}
+
+/* Status filter chips (open / hidden / resolved). Each toggles whether its
+   category of cards is shown; inactive chips read dimmed + struck-through. */
+.review-md-chips {
+  display: flex;
+  gap: var(--size-2-2);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.review-md-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  padding: 1px var(--size-2-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: none;
+  height: auto;
+}
+.review-md-chip .svg-icon {
+  width: 12px;
+  height: 12px;
+}
+.review-md-chip.is-active {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border-hover);
+}
+/* Inactive (filtered out of view): dim + strike the label so the toggle state
+   reads at a glance. */
+.review-md-chip:not(.is-active) {
+  opacity: 0.55;
+}
+.review-md-chip:not(.is-active) .review-md-chip-label {
+  text-decoration: line-through;
+}
+.review-md-chip.is-empty {
+  opacity: 0.35;
+}
+/* The "hidden" chip, when active, tints amber to echo the drift/outdated cue. */
+.review-md-chip[data-cat="hidden"].is-active {
+  color: #7a5600;
+  background: #fff3bf;
+  border-color: #f0c000;
+}
+
+/* A card filtered out by the chips. */
+.review-md-thread.is-filtered-out {
+  display: none;
 }
 
 .review-md-thread {

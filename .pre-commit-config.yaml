@@ -3,7 +3,7 @@
 # (gitleaks, dotenvx) — no network fetch, and identical to the `make` targets
 # CI runs (local == CI parity, per CLAUDE.md).
 #
-# Install:  make hooks   (or: pre-commit install)
+# Install:  make hooks   (installs both the pre-commit and post-commit hook types)
 repos:
   - repo: local
     hooks:
@@ -18,3 +18,45 @@ repos:
         entry: dotenvx ext precommit
         language: system
         pass_filenames: false
+
+      - id: xcallback-api
+        name: x-callback API docs in sync with schema
+        entry: node scripts/gen-xcallback-api.mjs --check
+        language: system
+        pass_filenames: false
+        files: '^(src/protocol/xcallback\.schema\.json|scripts/gen-xcallback-api\.mjs|docs/api/)'
+
+      # Schema-check any comment sidecar being committed: required fields, known
+      # anchor types, and — the common trap — hash fields YAML would parse as
+      # numbers unless quoted. pass_filenames so it only re-checks staged sidecars.
+      # See scripts/validate-comments.mjs / docs/issues/comment-metadata-validation.md.
+      - id: validate-comments
+        name: validate review-md comment sidecar metadata
+        entry: node scripts/validate-comments.mjs --quiet
+        language: system
+        files: '(^|/)\.[^/]+\.comments\.md$'
+
+      # Unit tests for the obsidian-free pure layer (src/pure.ts) — the hashing,
+      # revision-labelling and text-window logic. Runs on any staged src/ or test/
+      # change so a regression trips at commit time, not in a live review. Node
+      # strips the `.ts` natively (needs Node >= 22.6; .nvmrc pins 22.22.3). Same
+      # command as `make test`. See test/pure.test.ts.
+      - id: unit-tests
+        name: unit tests — pure review-md logic (node --test)
+        entry: node --test test/**/*.test.ts
+        language: system
+        pass_filenames: false
+        files: '^(src/|test/).*\.ts$'
+
+      # post-commit stage: after a commit lands, re-anchor any working-copy comment
+      # threads whose reviewed file was just committed (WORKING_REV → real commit).
+      # The reviewed file is committed in the CLI, not Obsidian, so this runs here
+      # rather than in the plugin. See docs/issues/reanchor-hook.md.
+      - id: reanchor-working-comments
+        name: re-anchor working-copy comment threads to their commit
+        entry: node scripts/reanchor-comments.mjs
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [post-commit]
+        verbose: true

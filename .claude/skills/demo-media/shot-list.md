@@ -50,21 +50,23 @@ Shows the anatomy of a thread: type badge, `on <commit>`, anchored excerpt, mess
 ### 4. mermaid comment badges (augmented diagram)
 Recoloured nodes + count badges (`💬`/`N`/`✓`) and edge badges, injected without
 touching the diagram source (requirement 9).
-- **Gotcha (learned):** the reading view **lazy-renders**, so the mermaid
-  post-processor's auto-augment does not reliably fire when a diagram is scrolled
-  into view under scripted stepping (separate `eval`/`cmd`/scroll calls each let the
-  section re-render out from under the observer). Drive the augment **atomically** in
-  one eval that scrolls, polls for the rendered host, then calls the plugin's own
-  `augmentRenderedMermaid(host, source, path)`. The helper
-  [`augment-mermaid.js`](augment-mermaid.js) does exactly this for the Architecture
-  diagram — pass it a fresh `reload` first:
+- **How it augments now:** the plugin drives the overlay from a MutationObserver on
+  the reading view's render container, so a diagram auto-augments whenever its `<svg>`
+  (re)appears — on first render *and* on scroll-in from cache (see
+  `docs/issues/mermaid-augment-lifecycle.md`). The capture therefore just needs to
+  scroll the diagram into view and let the observer fire; no manual augment call. The
+  helper [`scroll-to-mermaid.js`](scroll-to-mermaid.js) scrolls the Architecture
+  diagram in and polls for the auto-rendered badges:
   ```
   node scripts/capture-media.mjs reload
-  node scripts/capture-media.mjs eval --file .claude/skills/demo-media/augment-mermaid.js   # => badges=2 commented=1
+  node scripts/capture-media.mjs eval --file .claude/skills/demo-media/scroll-to-mermaid.js   # => badges=2 commented=1
   node scripts/capture-media.mjs shot --out docs/media/mermaid-badges.png \
        --selector '.mermaid:has(.review-md-node-badge)' --pad 20 --settle 300
   ```
-  For a different diagram, copy the helper and swap the `src`/node-id it targets.
+  For a different diagram, copy the helper and swap the heading/node-id it scrolls to.
+  (The old [`augment-mermaid.js`](augment-mermaid.js) nudge — a manual
+  `augmentRenderedMermaid` call with a hardcoded source — is no longer needed to make
+  badges appear; keep it only as a way to force a one-off augment for debugging.)
 
 ### 5. version stamp — committed vs working copy
 Two cards: one `on <commit>`, one **working copy**. Capture the pair.

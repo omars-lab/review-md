@@ -1,5 +1,13 @@
 # Research: Mermaid augmentation lost on reading-view re-render / scroll
 
+> **Superseded (2026-09-21) — read [`issues/mermaid-augment-lifecycle.md`](issues/mermaid-augment-lifecycle.md) first.**
+> This document's recommended fix (`ctx.addChild(new MarkdownRenderChild(el))` + a persistent
+> lifecycle observer) was implemented and **failed empirically**: its premise — that the reading-view
+> post-processor re-fires on scroll-in — is false. Obsidian restores cached sections without re-running
+> the post-processor, so no post-processor-anchored hook re-applies. The shipped fix is a per-view
+> `MutationObserver` on the render container. The section survey below is still useful background; the
+> "Recommended fix" is not.
+
 *Observed 2026-09-21. Primary sources: Obsidian Developer Docs, Obsidian forum. Where a
 claim could not be verified against a primary source it is marked **(inferred)**.*
 

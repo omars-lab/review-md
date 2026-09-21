@@ -5,13 +5,12 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
 
 ## Deferred
 
-- **Fix mermaid augment lost on reading-view re-render/scroll** — badges don't reliably
-  re-apply when a diagram scrolls into view or the section re-renders, because the augment
-  uses a one-shot `MutationObserver` that disconnects after first apply. Researched
-  2026-09-21: the idiomatic fix is `ctx.addChild(new MarkdownRenderChild(el))` with a
-  **persistent, idempotent** observer tied to the section lifecycle (not fire-once). Full
-  findings, code sketch, and trade-offs in [`docs/research.md`](research.md). Instrument the
-  post-processor to confirm re-fire timing before implementing.
+- ~~**Fix mermaid augment lost on reading-view re-render/scroll**~~ — **DONE 2026-09-21.** The
+  researched fix (`ctx.addChild` + lifecycle observer) was disproved empirically: the real root
+  cause is that Obsidian's reading view caches sections and does **not** re-run the markdown
+  post-processor on restore, so no post-processor-based hook re-applies. Replaced with a per-view
+  `MutationObserver` on the render container (unified with the Live-Preview augmenter via
+  `ensureMermaidAugmenter`). Pivot record: [`docs/issues/mermaid-augment-lifecycle.md`](issues/mermaid-augment-lifecycle.md).
 
 - **Comment on a link (`link` anchor type)** — in comment mode, **double-clicking a link**
   selects the *entire* link and starts a thread anchored to it (rather than the surrounding

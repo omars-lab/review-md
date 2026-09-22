@@ -387,7 +387,14 @@ export default class ReviewMdPlugin extends Plugin {
     const obs = new MutationObserver(scan);
     obs.observe(cm.contentDOM, { childList: true, subtree: true });
     this.lpObservers.set(view, obs);
-    this.register(() => obs.disconnect());
+    // Tie teardown to the VIEW, not the plugin: a plugin-lifetime `this.register`
+    // would retain `obs` — and via its `scan` closure the whole (closed) view —
+    // until the plugin unloads, defeating the WeakMap. `view.register` fires when
+    // the tab/leaf is detached, disconnecting and dropping the entry then.
+    view.register(() => {
+      obs.disconnect();
+      this.lpObservers.delete(view);
+    });
     void this.scanLivePreviewMermaid(view);
   }
 
@@ -413,7 +420,12 @@ export default class ReviewMdPlugin extends Plugin {
     const obs = new MutationObserver(scan);
     obs.observe(container, { childList: true, subtree: true });
     this.rvObservers.set(view, obs);
-    this.register(() => obs.disconnect());
+    // Teardown tied to the view (see ensureLivePreviewAugmenter): fires on tab
+    // close so a closed reading view isn't pinned in memory by its observer.
+    view.register(() => {
+      obs.disconnect();
+      this.rvObservers.delete(view);
+    });
     void this.scanReadingViewMermaid(view);
   }
 
@@ -574,6 +586,18 @@ export default class ReviewMdPlugin extends Plugin {
   onunload(): void {
     console.log("[review-md] unloaded");
     document.body.removeClass("review-md-comment-mode");
+    // Views closed during the session were cleaned by their own `view.register`.
+    // Any still-open markdown view's observer must be disconnected here — walk the
+    // live leaves rather than a retained list, so we never hold a closed view.
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof MarkdownView) {
+        this.lpObservers.get(view)?.disconnect();
+        this.lpObservers.delete(view);
+        this.rvObservers.get(view)?.disconnect();
+        this.rvObservers.delete(view);
+      }
+    }
   }
 
   /** Reveal the comments sidebar (reusing an open one), then focus it. */

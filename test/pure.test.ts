@@ -31,6 +31,7 @@ import {
   revLabelFor,
   snippetAround,
   middleEllipsis,
+  mermaidBlocksFrom,
 } from "../src/pure.ts";
 
 test("stripFrontmatter removes a normal YAML block, keeps the body", () => {
@@ -167,4 +168,40 @@ test("middleEllipsis elides only when over the limit, keeping both ends", () => 
   assert.ok(out.endsWith("END"));
   assert.ok(out.includes(" … "));
   assert.ok(out.length < long.length);
+});
+
+test("mermaidBlocksFrom extracts each fence body in document order", () => {
+  const doc = [
+    "# Doc",
+    "",
+    "```mermaid",
+    "flowchart TB",
+    "  A[Start] --> B[End]",
+    "```",
+    "",
+    "prose between",
+    "",
+    "```mermaid",
+    "flowchart LR",
+    "  X --> Y",
+    "```",
+    "",
+  ].join("\n");
+  const blocks = mermaidBlocksFrom(doc);
+  assert.equal(blocks.length, 2);
+  assert.ok(blocks[0].includes("A[Start] --> B[End]"));
+  assert.ok(blocks[1].includes("X --> Y"));
+  assert.ok(!blocks[0].includes("```"), "the fence markers are not captured");
+});
+
+test("mermaidBlocksFrom ignores non-mermaid fences and handles CRLF", () => {
+  const doc = "```js\nconst x = 1;\n```\r\n\r\n```mermaid\r\nflowchart TB\r\n  A --> B\r\n```\r\n";
+  const blocks = mermaidBlocksFrom(doc);
+  assert.equal(blocks.length, 1);
+  assert.ok(blocks[0].includes("A --> B"));
+  assert.ok(!blocks[0].includes("const x"));
+});
+
+test("mermaidBlocksFrom returns [] when there is no mermaid", () => {
+  assert.deepEqual(mermaidBlocksFrom("# just prose\n\nno diagrams here"), []);
 });

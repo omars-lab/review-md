@@ -562,13 +562,21 @@ export class CommentsView extends ItemView {
 
   /** Render the reviewed-version snippet into the expanded accordion body. */
   private async fillReviewedVersion(thread: ReviewThread, acc: HTMLElement): Promise<void> {
-    if (!this.file) return;
+    const file = this.file;
+    if (!file) return;
     const quote = typeof thread.anchor?.quote === "string" ? thread.anchor.quote : "";
-    const body = await this.plugin.reviewedBodyFor(this.file, thread);
+    const type = (thread.anchor as { type?: string })?.type;
+    const isMermaid = type === "mermaidNode" || type === "mermaidEdge";
+    const body = await this.plugin.reviewedBodyFor(file, thread);
+    if (!acc.isConnected) return; // card repainted while we awaited
     const box = acc.createDiv({ cls: "review-md-reviewed" });
     if (body !== null) {
       const commit = thread.rev?.git?.commit ?? "";
       box.createDiv({ cls: "review-md-reviewed-label", text: `reviewed @ ${commit}` });
+      // For a diagram node/edge, show a rendered preview of that element as it was
+      // in the reviewed version — not its bare text declaration. Fall through to
+      // the text snippet if the diagram can't be extracted or rendered.
+      if (isMermaid && (await this.tryRenderReviewedMermaid(file, thread, box))) return;
       box.createEl("pre", { text: snippetAround(body, quote) });
     } else if (quote) {
       box.createDiv({ cls: "review-md-reviewed-label", text: "stored quote (no git history)" });
@@ -576,6 +584,26 @@ export class CommentsView extends ItemView {
     } else {
       box.createDiv({ cls: "review-md-reviewed-label", text: "no reviewed version available" });
     }
+  }
+
+  /**
+   * Render the reviewed version's mermaid node/edge as a mini SVG into the
+   * accordion body. Returns true if it drew something, false (drew nothing) so the
+   * caller can fall back to the text snippet — when the diagram is gone from that
+   * version or mermaid can't render it.
+   */
+  private async tryRenderReviewedMermaid(
+    file: TFile,
+    thread: ReviewThread,
+    box: HTMLElement,
+  ): Promise<boolean> {
+    const src = await this.plugin.reviewedMermaidPreviewSource(file, thread);
+    if (!src || !box.isConnected) return false;
+    const svg = await this.plugin.renderMermaidSvg(src);
+    if (!svg || !box.isConnected) return false;
+    const host = box.createDiv({ cls: "review-md-node-preview is-loaded" });
+    host.innerHTML = svg;
+    return true;
   }
 
   /** Swap a message row's body for an editable textarea with Save / Cancel. */

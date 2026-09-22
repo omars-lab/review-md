@@ -20,6 +20,7 @@ import {
   sha256Short,
   bodyHash,
   ordinalsFromLog,
+  mermaidBlocksFrom,
 } from "./pure";
 
 // Re-export the pure helpers other modules and tests still import from here, so
@@ -1205,8 +1206,35 @@ export default class ReviewMdPlugin extends Plugin {
     }
     const ctx = await this.gitContext(file);
     if (!ctx) return null;
-    const out = await ctx.run(["show", `${commit}:${ctx.rel}`], false);
-    return out === null ? null : stripFrontmatter(out);
+    const direct = await ctx.run(["show", `${commit}:${ctx.rel}`], false);
+    if (direct !== null) return stripFrontmatter(direct);
+    // The file may have been renamed since `commit` (the flagship doc moved into
+    // docs/designs/), so `commit:<current-path>` doesn't exist. Resolve the file's
+    // historical path(s) via --follow and retry, so the reviewed body — and the
+    // diagram preview built from it — survives renames. Without this every stamp
+    // predating a rename silently falls back to the stored quote.
+    // See docs/issues/reviewed-body-across-renames.md.
+    for (const path of await this.historicalPaths(ctx)) {
+      if (path === ctx.rel) continue;
+      const out = await ctx.run(["show", `${commit}:${path}`], false);
+      if (out !== null) return stripFrontmatter(out);
+    }
+    return null;
+  }
+
+  /** Every path this file has had across its rename history (newest first),
+   *  deduplicated. Used to recover an old blob whose path differs from today's. */
+  private async historicalPaths(ctx: {
+    run: (args: string[], trim?: boolean) => Promise<string | null>;
+    rel: string;
+  }): Promise<string[]> {
+    const log = await ctx.run(["log", "--follow", "--name-only", "--format=", "--", ctx.rel], false);
+    if (!log) return [];
+    const paths: string[] = [];
+    for (const line of log.split("\n").map((s) => s.trim())) {
+      if (line && !paths.includes(line)) paths.push(line);
+    }
+    return paths;
   }
 
   /** Ask the sidebar to scroll to and focus a thread's card + reply box. */
@@ -1824,12 +1852,7 @@ export default class ReviewMdPlugin extends Plugin {
 
   /** Every ```mermaid fence's source in a file (fences stripped). */
   private async mermaidBlocksIn(file: TFile): Promise<string[]> {
-    const text = await this.app.vault.read(file);
-    const re = /^[ \t]*`{3,}\s*mermaid\s*\r?\n([\s\S]*?)\r?\n[ \t]*`{3,}\s*$/gm;
-    const blocks: string[] = [];
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) blocks.push(m[1]);
-    return blocks;
+    return mermaidBlocksFrom(await this.app.vault.read(file));
   }
 
   /**
@@ -1840,11 +1863,17 @@ export default class ReviewMdPlugin extends Plugin {
    * Returns null for non-mermaidNode anchors.
    */
   async mermaidNodePreviewSource(file: TFile, thread: ReviewThread): Promise<string | null> {
+    return this.nodePreviewFromBlocks(await this.mermaidBlocksIn(file), thread);
+  }
+
+  /** As `mermaidNodePreviewSource`, but from a supplied set of mermaid fence
+   *  bodies (e.g. a previous version pulled from git) rather than the live file. */
+  private nodePreviewFromBlocks(blocks: string[], thread: ReviewThread): string | null {
     const a = thread.anchor as { type?: string; node?: string; quote?: string };
     if (a?.type !== "mermaidNode" || !a.node) return null;
     const node = a.node;
     const nodeRe = new RegExp(`(^|[^\\w])${escapeRegExp(node)}([^\\w]|$)`, "m");
-    const src = (await this.mermaidBlocksIn(file)).find((b) => nodeRe.test(b));
+    const src = blocks.find((b) => nodeRe.test(b));
     let def: string | null = null;
     if (src) {
       // Capture the node's declared shape+label (the occurrence that carries one).
@@ -1882,9 +1911,14 @@ export default class ReviewMdPlugin extends Plugin {
    * Returns null for non-mermaidEdge anchors.
    */
   async mermaidEdgePreviewSource(file: TFile, thread: ReviewThread): Promise<string | null> {
+    return this.edgePreviewFromBlocks(await this.mermaidBlocksIn(file), thread);
+  }
+
+  /** As `mermaidEdgePreviewSource`, but from a supplied set of mermaid fence
+   *  bodies (e.g. a previous version pulled from git) rather than the live file. */
+  private edgePreviewFromBlocks(blocks: string[], thread: ReviewThread): string | null {
     const a = thread.anchor as { type?: string; from?: string; to?: string };
     if (a?.type !== "mermaidEdge" || !a.from || !a.to) return null;
-    const blocks = await this.mermaidBlocksIn(file);
     const shapes =
       "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
     const defOf = (node: string): string => {
@@ -1895,6 +1929,25 @@ export default class ReviewMdPlugin extends Plugin {
       return `${node}["${node}"]`;
     };
     return `flowchart LR\n  ${defOf(a.from)} -->|💬| ${defOf(a.to)}`;
+  }
+
+  /**
+   * A mermaid preview source for a node/edge thread built from the version the
+   * comment was reviewed against (via `reviewedBodyFor` → git), so the Content
+   * Revisions accordion can render the diagram *as it was then* instead of the
+   * node's bare text id. Returns null for non-mermaid anchors, or when the
+   * reviewed body isn't recoverable (no git history / drifted working copy) — the
+   * caller then falls back to the stored quote.
+   */
+  async reviewedMermaidPreviewSource(file: TFile, thread: ReviewThread): Promise<string | null> {
+    const type = (thread.anchor as { type?: string })?.type;
+    if (type !== "mermaidNode" && type !== "mermaidEdge") return null;
+    const body = await this.reviewedBodyFor(file, thread);
+    if (body === null) return null;
+    const blocks = mermaidBlocksFrom(body);
+    return type === "mermaidEdge"
+      ? this.edgePreviewFromBlocks(blocks, thread)
+      : this.nodePreviewFromBlocks(blocks, thread);
   }
 
   /** Render mermaid source to an SVG string, or null if mermaid/render fails. */

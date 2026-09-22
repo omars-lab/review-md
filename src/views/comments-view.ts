@@ -467,7 +467,7 @@ export class CommentsView extends ItemView {
       if (!src || !host.isConnected) return;
       const svg = await this.plugin.renderMermaidSvg(src);
       if (!svg || !host.isConnected) return; // silent: card still shows the text anchor
-      host.innerHTML = svg;
+      if (!setSvg(host, svg)) return;
       host.addClass("is-loaded");
     });
   }
@@ -602,7 +602,10 @@ export class CommentsView extends ItemView {
     const svg = await this.plugin.renderMermaidSvg(src);
     if (!svg || !box.isConnected) return false;
     const host = box.createDiv({ cls: "review-md-node-preview is-loaded" });
-    host.innerHTML = svg;
+    if (!setSvg(host, svg)) {
+      host.remove();
+      return false;
+    }
     return true;
   }
 
@@ -719,6 +722,23 @@ export class CommentsView extends ItemView {
       new Notice(`review-md: ${String(err)}`);
     }
   }
+}
+
+/**
+ * Inject a rendered mermaid SVG into `host` without assigning `innerHTML`
+ * (Obsidian plugin guidelines reject `innerHTML`/`outerHTML` assignment). The
+ * SVG string comes from mermaid's own `render`; we parse it as an XML document
+ * and adopt the `<svg>` node rather than string-injecting it. Returns false —
+ * drawing nothing — if the string doesn't parse to an `<svg>`, so callers keep
+ * their text fallback.
+ */
+function setSvg(host: HTMLElement, svg: string): boolean {
+  const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+  const el = doc.documentElement;
+  if (doc.querySelector("parsererror") || el.localName !== "svg") return false;
+  host.empty();
+  host.appendChild(document.importNode(el, true));
+  return true;
 }
 
 /** A button with a leading Lucide icon and an optional text label. */

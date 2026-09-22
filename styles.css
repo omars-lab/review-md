@@ -487,6 +487,10 @@ body.review-md-comment-mode .markdown-preview-view * {
 
 /* Mermaid comment badge: a 💬 pill overlaid on a commented node (top-right
    corner) or at a commented edge's midpoint. Shared style for both. */
+.review-md-edge-badge,
+.review-md-node-badge {
+  cursor: pointer;
+}
 .review-md-edge-badge circle,
 .review-md-node-badge circle {
   fill: #fff3bf;

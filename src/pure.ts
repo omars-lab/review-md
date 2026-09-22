@@ -116,6 +116,21 @@ export function ordinalsFromLog(log: string): Map<string, number> {
   return out;
 }
 
+/**
+ * Every ```mermaid fence body in a markdown text, in document order. The one
+ * definition of "the mermaid sources in this doc" — used both against the current
+ * file and against a reviewed (previous) version pulled from git, so a node/edge's
+ * preview can be rebuilt from whichever version we're showing. Matches a fence of
+ * three-or-more backticks tagged `mermaid`, capturing the inner source only.
+ */
+export function mermaidBlocksFrom(text: string): string[] {
+  const re = /^[ \t]*`{3,}\s*mermaid\s*\r?\n([\s\S]*?)\r?\n[ \t]*`{3,}\s*$/gm;
+  const blocks: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) blocks.push(m[1]);
+  return blocks;
+}
+
 /** Identity of the revision a thread was authored against — the SAME value the
  *  card's version stamp shows: a git commit (incl. WORKING_REV) when the file was
  *  tracked, else the body-hash. `null` for an unstamped thread. */

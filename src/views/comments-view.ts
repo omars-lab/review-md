@@ -503,7 +503,7 @@ export class CommentsView extends ItemView {
     if (this.file !== file) return; // the user switched files while we awaited
     this.bodyHash = bodyHash;
     this.outdatedIds = new Set(threads.filter((_, i) => flags[i]).map((t) => t.id));
-    this.fillVersionRows();
+    void this.fillVersionRows();
   }
 
   /**
@@ -512,8 +512,12 @@ export class CommentsView extends ItemView {
    * artifact a comment belongs to — plus an "outdated" warning when the anchored
    * content has changed since. Runs after computeStaleness resolves drift.
    */
-  private fillVersionRows(): void {
-    if (!this.file) return;
+  private async fillVersionRows(): Promise<void> {
+    const file = this.file;
+    if (!file) return;
+    // One git call for the whole batch: the file's version ladder (sha → v-number).
+    const ordinals = await this.plugin.fileRevisionOrdinals(file);
+    if (this.file !== file) return; // the user switched files while we awaited
     const byId = new Map(this.threads.map((t) => [t.id, t]));
     this.contentEl.querySelectorAll<HTMLElement>(".review-md-thread").forEach((card) => {
       const id = card.dataset.threadId;
@@ -522,104 +526,170 @@ export class CommentsView extends ItemView {
       if (!slot || !thread) return;
       slot.empty();
       slot.removeClass("is-visible");
-      const rev = thread.rev;
-      if (!rev?.bodyHash) return; // seeded fixtures with no stamp stay quiet
+      if (!thread.rev?.bodyHash) return; // seeded fixtures with no stamp stay quiet
       slot.addClass("is-visible");
-
-      // Always: which version this comment was made against. A commit sha when the
-      // file was git-tracked at authoring time, "working copy" for a comment left
-      // on uncommitted state, else the body-hash slug.
-      const working = rev.git?.commit === WORKING_REV;
-      const version = working ? "working copy" : (rev.git?.commit ?? rev.bodyHash.slice(0, 7));
-      const stamp = slot.createSpan({ cls: "review-md-rev-base" });
-      setIcon(stamp.createSpan({ cls: "review-md-rev-icon" }), working ? "git-branch" : "git-commit");
-      stamp.createSpan({ text: working ? ` ${version}` : ` on ${version}` });
-      stamp.title = working
-        ? "Comment made on the uncommitted working copy; re-anchors to a commit when the file is committed"
-        : `Comment made on version ${version}`;
-
-      // Only when the reviewed body has since diverged: an outdated warning.
-      if (this.outdatedIds.has(thread.id)) {
-        const badge = slot.createSpan({ cls: "review-md-outdated" });
-        setIcon(badge, "alert-triangle");
-        badge.createSpan({ text: "outdated" });
-      }
-
-      // The exact text this comment was made against lives in a collapsed
-      // "Content Revisions" accordion at the foot of the card (not a button up
-      // here); it loads lazily the first time it's expanded.
-      this.addRevisionsAccordion(thread, card);
+      this.renderVersionStepper(thread, slot, ordinals, this.outdatedIds.has(thread.id));
     });
     // Drift is now known — repaint chip counts + apply the filter.
     this.applyFilter();
   }
 
   /**
-   * A collapsed "Content Revisions" accordion at the foot of the card. Expanding
-   * it reveals the text as it was when the comment was made; the content is
-   * fetched lazily the first time it's opened. Idempotent across re-renders.
+   * The card's version row: a stepper `‹ vK (sha) ›` in place of the old static
+   * "on <sha>" stamp plus the "Content Revisions" accordion. The comment was
+   * authored against one version; the stepper opens there and browses the file's
+   * history one version at a time. Per the chosen mapping, the LEFT button steps
+   * toward the latest version (disabled once there) and the RIGHT button toward
+   * older ones (disabled at the oldest). The centred label names the version and,
+   * clicked, toggles an inline preview of the anchored content as it was then, so
+   * cards stay compact until you ask to see the content.
    */
-  private addRevisionsAccordion(thread: ReviewThread, card: HTMLElement): void {
-    card.querySelector(".review-md-revisions")?.remove(); // drop a stale one on repaint
-    const acc = card.createEl("details", { cls: "review-md-revisions" });
-    const summary = acc.createEl("summary", { cls: "review-md-revisions-summary" });
-    setIcon(summary.createSpan({ cls: "review-md-revisions-caret" }), "chevron-right");
-    summary.createSpan({ cls: "review-md-revisions-label", text: "Content Revisions" });
-    let loaded = false;
-    acc.addEventListener("toggle", () => {
-      if (!acc.open || loaded) return;
-      loaded = true;
-      void this.fillReviewedVersion(thread, acc);
+  private renderVersionStepper(
+    thread: ReviewThread,
+    slot: HTMLElement,
+    ordinals: Map<string, number>,
+    outdated: boolean,
+  ): void {
+    const authored = revKeyOf(thread.rev);
+    // Ordered newest→oldest: committed versions by v-number descending. The
+    // uncommitted working copy only joins the ladder when the comment itself was
+    // authored on it (an otherwise-committed file's ladder is its commits).
+    const commits = [...ordinals.entries()].sort((a, b) => b[1] - a[1]).map(([sha]) => sha);
+    const versions = authored === WORKING_REV ? [WORKING_REV, ...commits] : commits;
+    const startIdx = authored ? versions.indexOf(authored) : -1;
+
+    // No usable git ladder (unstamped, body-hash-only, or a commit not in this
+    // file's history): fall back to the plain authored-version stamp, no stepper.
+    if (startIdx === -1) {
+      this.renderStaticStamp(thread, slot, outdated);
+      return;
+    }
+
+    let idx = startIdx;
+    const cache = new Map<string, string | null>(); // fetched body per version key
+    const step = slot.createDiv({ cls: "review-md-verstep" });
+    const newer = step.createEl("button", {
+      cls: "review-md-verstep-btn",
+      attr: { "aria-label": "Newer version" },
     });
+    setIcon(newer, "chevron-left");
+    const label = step.createEl("button", { cls: "review-md-verstep-label" });
+    const older = step.createEl("button", {
+      cls: "review-md-verstep-btn",
+      attr: { "aria-label": "Older version" },
+    });
+    setIcon(older, "chevron-right");
+    if (outdated) {
+      const badge = step.createSpan({ cls: "review-md-outdated" });
+      setIcon(badge, "alert-triangle");
+      badge.createSpan({ text: "outdated" });
+    }
+    const preview = slot.createDiv({ cls: "review-md-verpreview" });
+    preview.hidden = true;
+
+    const sync = () => {
+      const key = versions[idx];
+      const isAuthored = key === authored;
+      label.setText(revLabelFor(key, ordinals));
+      label.toggleClass("is-authored", isAuthored);
+      label.title = isAuthored
+        ? "The version this comment was authored against — click to preview its content"
+        : `Preview the anchored content as it was in ${revLabelFor(key, ordinals)}`;
+      newer.disabled = idx === 0; // already at the latest
+      older.disabled = idx === versions.length - 1; // already at the oldest
+      if (!preview.hidden) void this.showVersionPreview(thread, preview, key, ordinals, cache);
+    };
+    newer.onclick = () => {
+      if (idx > 0) {
+        idx--;
+        sync();
+      }
+    };
+    older.onclick = () => {
+      if (idx < versions.length - 1) {
+        idx++;
+        sync();
+      }
+    };
+    label.onclick = () => {
+      preview.hidden = !preview.hidden;
+      step.toggleClass("is-open", !preview.hidden);
+      if (!preview.hidden) void this.showVersionPreview(thread, preview, versions[idx], ordinals, cache);
+    };
+    sync();
   }
 
-  /** Render the reviewed-version snippet into the expanded accordion body. */
-  private async fillReviewedVersion(thread: ReviewThread, acc: HTMLElement): Promise<void> {
-    const file = this.file;
-    if (!file) return;
-    const quote = typeof thread.anchor?.quote === "string" ? thread.anchor.quote : "";
-    const type = (thread.anchor as { type?: string })?.type;
-    const isMermaid = type === "mermaidNode" || type === "mermaidEdge";
-    const body = await this.plugin.reviewedBodyFor(file, thread);
-    if (!acc.isConnected) return; // card repainted while we awaited
-    const box = acc.createDiv({ cls: "review-md-reviewed" });
-    if (body !== null) {
-      const commit = thread.rev?.git?.commit ?? "";
-      box.createDiv({ cls: "review-md-reviewed-label", text: `reviewed @ ${commit}` });
-      // For a diagram node/edge, show a rendered preview of that element as it was
-      // in the reviewed version — not its bare text declaration. Fall through to
-      // the text snippet if the diagram can't be extracted or rendered.
-      if (isMermaid && (await this.tryRenderReviewedMermaid(file, thread, box))) return;
-      box.createEl("pre", { text: snippetAround(body, quote) });
-    } else if (quote) {
-      box.createDiv({ cls: "review-md-reviewed-label", text: "stored quote (no git history)" });
-      box.createEl("pre", { text: quote });
-    } else {
-      box.createDiv({ cls: "review-md-reviewed-label", text: "no reviewed version available" });
+  /** The plain "on <sha>" / "working copy" stamp, for threads with no navigable
+   *  git ladder (unstamped fixtures, body-hash-only, or off a git work tree). */
+  private renderStaticStamp(thread: ReviewThread, slot: HTMLElement, outdated: boolean): void {
+    const rev = thread.rev;
+    if (!rev?.bodyHash) return;
+    const working = rev.git?.commit === WORKING_REV;
+    const version = working ? "working copy" : (rev.git?.commit ?? rev.bodyHash.slice(0, 7));
+    const stamp = slot.createSpan({ cls: "review-md-rev-base" });
+    setIcon(stamp.createSpan({ cls: "review-md-rev-icon" }), working ? "git-branch" : "git-commit");
+    stamp.createSpan({ text: working ? ` ${version}` : ` on ${version}` });
+    stamp.title = working
+      ? "Comment made on the uncommitted working copy; re-anchors to a commit when the file is committed"
+      : `Comment made on version ${version}`;
+    if (outdated) {
+      const badge = slot.createSpan({ cls: "review-md-outdated" });
+      setIcon(badge, "alert-triangle");
+      badge.createSpan({ text: "outdated" });
     }
   }
 
   /**
-   * Render the reviewed version's mermaid node/edge as a mini SVG into the
-   * accordion body. Returns true if it drew something, false (drew nothing) so the
-   * caller can fall back to the text snippet — when the diagram is gone from that
-   * version or mermaid can't render it.
+   * Render the anchored content as it was in one version into the stepper's inline
+   * preview box. The body is fetched via `bodyAtRevision` (cached per version so
+   * re-stepping is instant) and shown as a rendered mini-diagram for node/edge
+   * anchors, else a text snippet centred on the anchor quote. A `want` guard drops
+   * a late fetch when the user has already stepped on.
    */
-  private async tryRenderReviewedMermaid(
-    file: TFile,
+  private async showVersionPreview(
     thread: ReviewThread,
     box: HTMLElement,
-  ): Promise<boolean> {
-    const src = await this.plugin.reviewedMermaidPreviewSource(file, thread);
-    if (!src || !box.isConnected) return false;
-    const svg = await this.plugin.renderMermaidSvg(src);
-    if (!svg || !box.isConnected) return false;
-    const host = box.createDiv({ cls: "review-md-node-preview is-loaded" });
-    if (!setSvg(host, svg)) {
-      host.remove();
-      return false;
+    versionKey: string,
+    ordinals: Map<string, number>,
+    cache: Map<string, string | null>,
+  ): Promise<void> {
+    const file = this.file;
+    if (!file) return;
+    box.dataset.want = versionKey;
+    box.empty();
+    const holder = box.createDiv({ cls: "review-md-reviewed" });
+    const label = revLabelFor(versionKey, ordinals);
+    let body: string | null;
+    if (cache.has(versionKey)) {
+      body = cache.get(versionKey) ?? null;
+    } else {
+      holder.createDiv({ cls: "review-md-reviewed-label", text: `Loading ${label}…` });
+      body = await this.plugin.bodyAtRevision(file, versionKey);
+      if (!box.isConnected || box.dataset.want !== versionKey) return; // superseded
+      cache.set(versionKey, body);
+      holder.empty();
     }
-    return true;
+    if (body === null) {
+      holder.createDiv({ cls: "review-md-reviewed-label", text: `Not available in ${label}` });
+      return;
+    }
+    holder.createDiv({ cls: "review-md-reviewed-label", text: label });
+
+    const type = (thread.anchor as { type?: string })?.type;
+    if (type === "mermaidNode" || type === "mermaidEdge") {
+      const src = this.plugin.mermaidPreviewSourceFromBody(body, thread);
+      if (src) {
+        const svg = await this.plugin.renderMermaidSvg(src);
+        if (!box.isConnected || box.dataset.want !== versionKey) return; // superseded
+        if (svg) {
+          const host = holder.createDiv({ cls: "review-md-node-preview is-loaded" });
+          if (setSvg(host, svg)) return;
+          host.remove();
+        }
+      }
+    }
+    const quote = typeof thread.anchor?.quote === "string" ? thread.anchor.quote : "";
+    holder.createEl("pre", { text: snippetAround(body, quote) });
   }
 
   /** Swap a message row's body for an editable textarea with Save / Cancel. */

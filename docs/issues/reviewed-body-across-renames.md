@@ -1,5 +1,12 @@
 # Reviewed body (and diagram preview) must follow renames
 
+> **Later:** the **Content Revisions accordion** described here was replaced by the
+> inline **version stepper** ([version-stepper.md](version-stepper.md)). The
+> rename-following fix below still stands, but two helpers it names were generalised
+> and renamed: `reviewedBodyFor` → `bodyAtRevision(file, commit)` and
+> `reviewedMermaidPreviewSource` → `mermaidPreviewSourceFromBody(body, thread)`;
+> `fillReviewedVersion` is gone (its render logic now lives in `showVersionPreview`).
+
 ## Symptom
 
 The **Content Revisions** accordion for a mermaid node/edge comment showed the

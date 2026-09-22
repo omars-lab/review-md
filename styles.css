@@ -367,6 +367,28 @@
   word-break: break-word;
 }
 
+/* Link anchor: the display text over its target href, so the card shows both
+   halves of what was commented on. */
+.review-md-link-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+  margin: var(--size-4-1) 0;
+  padding: var(--size-2-2) var(--size-4-2);
+  border-left: 3px solid var(--interactive-accent);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+.review-md-link-text {
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+}
+.review-md-link-href {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  word-break: break-all;
+}
+
 /* ---- Version staleness (rev stamp) ---- */
 .review-md-rev {
   display: none;

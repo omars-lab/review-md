@@ -725,6 +725,16 @@ export default class ReviewMdPlugin extends Plugin {
       const src = img.getAttribute("src") ?? "";
       return { type: "image", src };
     }
+    // 2b) A link — internal `[[wikilink]]` (Obsidian stashes the target on
+    // `data-href`) or an external URL (`href`). After the image branch so an
+    // image wrapped in a link still anchors to the image, before the text
+    // fallback so link text doesn't collapse into its containing block.
+    const link = target.closest("a") as HTMLAnchorElement | null;
+    if (link) {
+      const href = (link.getAttribute("data-href") ?? link.getAttribute("href") ?? "").trim();
+      const quote = (link.textContent ?? "").trim();
+      if (href || quote) return { type: "link", href, quote: quote.slice(0, 200) };
+    }
     // 3) Text in the CM6 editor surface: map the click to a source position via
     // posAtCoords (exact, no reliance on the reading-view line post-processor).
     if (ctx) {
@@ -844,15 +854,17 @@ export default class ReviewMdPlugin extends Plugin {
     const ordered = [...data.threads].sort((a, b) => Number(a.resolved) - Number(b.resolved));
     if (!ordered.length) lines.push("_No comment threads yet._");
     for (const t of ordered) {
-      const a = t.anchor as { type?: string; node?: string; quote?: string; src?: string };
+      const a = t.anchor as { type?: string; node?: string; quote?: string; src?: string; href?: string };
       const where =
         a.type === "mermaidNode"
           ? `diagram node \`${a.node}\``
           : a.type === "image"
             ? `image \`${a.src}\``
-            : a.quote
-              ? `“${a.quote.replace(/\s+/g, " ").slice(0, 80)}”`
-              : a.type ?? "text";
+            : a.type === "link"
+              ? `link ${a.quote ? `“${a.quote.replace(/\s+/g, " ").slice(0, 60)}” ` : ""}→ \`${a.href ?? ""}\``
+              : a.quote
+                ? `“${a.quote.replace(/\s+/g, " ").slice(0, 80)}”`
+                : a.type ?? "text";
       lines.push(`## [${t.id}] ${where}${t.resolved ? " · resolved" : ""}`);
       if (!t.messages.length) lines.push("", "_(no messages yet)_");
       for (const m of t.messages) lines.push("", `**${m.author}** · ${m.ts}`, "", m.body);
@@ -990,6 +1002,7 @@ export default class ReviewMdPlugin extends Plugin {
       quote?: string;
       blockId?: string;
       src?: string;
+      href?: string;
     };
     const norm = (s: string) => s.replace(/\s+/g, " ").trim();
     switch (a.type) {
@@ -1041,6 +1054,17 @@ export default class ReviewMdPlugin extends Plugin {
         if (!a.src) return undefined;
         const text = await this.app.vault.read(file);
         return text.includes(a.src) ? a.src : null;
+      }
+      case "link": {
+        const href = a.href ?? "";
+        const q = a.quote ?? "";
+        if (!href && !q) return undefined;
+        // The link is "still there" as long as its target (href) — or, for a
+        // bare-text link, its display text — appears in the source. href+text
+        // together are the anchored identity, so a change to either is outdated.
+        const text = await this.app.vault.read(file);
+        const present = href ? text.includes(href) : norm(text).includes(norm(q));
+        return present ? norm(`${href} ${q}`) : null;
       }
       default:
         return undefined;
@@ -1271,10 +1295,22 @@ export default class ReviewMdPlugin extends Plugin {
       to?: string;
       index?: number;
       blockId?: string;
+      href?: string;
     };
     let el: HTMLElement | null = null;
 
-    if (a.type === "image" && a.src) {
+    if (a.type === "link" && (a.href || a.quote)) {
+      // Match on the target first (internal links stash it on `data-href`,
+      // external on `href`), then fall back to the display text. Iterating the
+      // <a> set avoids attribute-selector escaping on arbitrary hrefs.
+      const links = Array.from(container.querySelectorAll("a")) as HTMLAnchorElement[];
+      el =
+        (a.href
+          ? links.find((l) => (l.getAttribute("data-href") ?? l.getAttribute("href")) === a.href)
+          : undefined) ??
+        (a.quote ? links.find((l) => (l.textContent ?? "").trim() === a.quote) : undefined) ??
+        null;
+    } else if (a.type === "image" && a.src) {
       el = container.querySelector(`img[src="${a.src}"], img[src$="${a.src}"]`) as HTMLElement | null;
     } else if (a.type === "mermaidNode" && a.node) {
       el = container.querySelector(`g.node[id*="-${a.node}-"], g.node[id$="-${a.node}"]`) as HTMLElement | null;
@@ -1960,6 +1996,7 @@ function describeAnchorShort(anchor: Record<string, unknown>): string {
   if (type === "mermaidNode") return `node ${anchor.node}`;
   if (type === "mermaidEdge") return `edge ${anchor.from}→${anchor.to}`;
   if (type === "image") return "image";
+  if (type === "link") return "link";
   return "text";
 }
 

@@ -382,6 +382,8 @@ export class CommentsView extends ItemView {
       this.renderMermaidPreview(card, thread);
     } else if (anchorType === "text") {
       this.renderTextPreview(card, thread);
+    } else if (anchorType === "link") {
+      this.renderLinkPreview(card, thread);
     }
 
     const msgs = card.createDiv({ cls: "review-md-messages" });
@@ -452,6 +454,17 @@ export class CommentsView extends ItemView {
     const text = typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
     if (!text) return;
     card.createEl("blockquote", { cls: "review-md-text-preview", text: middleEllipsis(text) });
+  }
+
+  /** Inline preview for a link anchor: the display text plus its target href. */
+  private renderLinkPreview(card: HTMLElement, thread: ReviewThread): void {
+    const a = thread.anchor as { href?: unknown; quote?: unknown };
+    const href = typeof a.href === "string" ? a.href.trim() : "";
+    const quote = typeof a.quote === "string" ? a.quote.replace(/\s+/g, " ").trim() : "";
+    if (!href && !quote) return;
+    const box = card.createDiv({ cls: "review-md-link-preview" });
+    if (quote) box.createSpan({ cls: "review-md-link-text", text: middleEllipsis(quote) });
+    if (href) box.createEl("code", { cls: "review-md-link-href", text: middleEllipsis(href) });
   }
 
   /** Render a mini SVG of the commented diagram node or edge into the card. */
@@ -762,6 +775,8 @@ function anchorTypeLabel(anchor: Record<string, unknown>): string {
       return "image";
     case "header":
       return "header";
+    case "link":
+      return "link";
     default:
       return String(anchor?.type ?? "unknown");
   }
@@ -773,6 +788,7 @@ function describeAnchor(anchor: Record<string, unknown>): string {
   if (type === "mermaidNode") return `diagram ${anchor.blockId ?? "?"} · node ${anchor.node ?? "?"}`;
   if (type === "mermaidEdge") return `diagram ${anchor.blockId ?? "?"} · edge ${anchor.from ?? "?"} → ${anchor.to ?? "?"}`;
   if (type === "image") return `image ${anchor.src ?? "?"}`;
+  if (type === "link") return `link → ${anchor.href ?? anchor.quote ?? "?"}`;
   if (type === "text") {
     // The full passage is shown in the blockquote preview below, so keep the
     // summary line terse (just a line ref when there's no quote to preview).

@@ -40,17 +40,18 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
   `MutationObserver` on the render container (unified with the Live-Preview augmenter via
   `ensureMermaidAugmenter`). Pivot record: [`docs/issues/mermaid-augment-lifecycle.md`](issues/mermaid-augment-lifecycle.md).
 
-- **Comment on a link (`link` anchor type)** — in comment mode, **double-clicking a link**
-  selects the *entire* link and starts a thread anchored to it (rather than the surrounding
-  `text` block). New anchor type `link` alongside `text`/`header`/`image`/`mermaidNode`/
-  `mermaidEdge`; likely fields: `href` (the link target — internal `[[wikilink]]` or external
-  URL), `quote` (the link display text), and the existing `line`/`blockId` for fallback. Render:
-  the reviewer highlights the whole `<a>`/`.internal-link`/`.external-link` element on
-  double-click and anchors there. Staleness (`anchorContentFor`) extracts the link's
-  href+text. Additive — extends the anchor union and `validate-comments` `ANCHOR_REQUIRED`,
-  no breaking change. Requested 2026-09-21. ROI: medium — reuses the click-to-comment plumbing;
-  the new work is link-element hit detection (double-click vs the single-click block anchor) and
-  the extraction case. Pull into a small POC or issue note when picked up.
+- ~~**Comment on a link (`link` anchor type)**~~ — **DONE 2026-09-21.** New `link` anchor
+  type alongside `text`/`header`/`image`/`mermaidNode`/`mermaidEdge`, fields `href` (internal
+  `[[wikilink]]` target read off `data-href`, or an external URL off `href`) + `quote` (display
+  text). **Design deviation from the spec:** kept the existing **single-click** comment-mode
+  path rather than adding a double-click gesture — `resolveClickAnchor` gains an `<a>` hit-test
+  after `img` and before the text fallback, so clicking a link in comment mode anchors to the
+  link and clicking prose still anchors to the block. Double-click would have been inconsistent
+  with every other anchor type and more code for no gain. Wired at all eleven per-type sites
+  (create, staleness `anchorContentFor`, `highlightAnchor` flash/scroll, sidecar body, card
+  badge + inline preview, CLI `anchorWhere`, `validate-comments` `ANCHOR_REQUIRED: href+quote`).
+  Verified live end-to-end in the harness (internal + external link → correct anchor; staleness
+  present/removed; card badge + preview render; flash locates the `<a>`).
 
 - **In-image coordinate/region pinning** — anchor a comment to a specific point or rectangle inside
   an image, not just the image as a whole. Traded off 2026-09-19 ("we don't need coordinates for

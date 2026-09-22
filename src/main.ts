@@ -66,16 +66,13 @@ const DEFAULT_SETTINGS: ReviewMdSettings = {
 };
 
 /**
- * review-md — scaffold entry point.
+ * review-md — plugin entry point.
  *
- * Minimal on purpose: it stands up the plugin, registers the
- * `obsidian://review-md` protocol handler (POC-1), and ships a self-reporting
- * POC-4 command that exercises processFrontMatter at scale. Both POCs write a
- * report note into the vault so results are verifiable from the file system
- * (no dev console needed). See docs/pocs/.
+ * Stands up the plugin: the click-to-comment UI, the comments sidebar, the
+ * mermaid overlay augmenter, and the `obsidian://review-md` x-callback protocol
+ * handlers (share / reply / open links). Design and the earlier proof-of-concept
+ * notes live in docs/pocs/ and docs/designs/.
  */
-
-const POC4_THREADS = 50;
 
 export interface ReviewMessage { author: string; ts: string; body: string; }
 /**
@@ -146,28 +143,6 @@ function nodeRequire(mod: string): any {
  *  the per-anchor staleness check must read node declarations identically. */
 const MERMAID_SHAPES =
   "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
-
-const POC4_BODIES = [
-  "why radial here? seems arbitrary",
-  'key: value looking text with "quotes" and a trailing colon:',
-  "multi-line\nreply with a second line\n- and a bullet",
-  "# looks like a heading and `code` and [a link](https://x.test)",
-  "unicode ✓ diacritics ū ḥ ʿ emoji 🎯 keep intact",
-];
-
-function makePoc4Thread(i: number): ReviewThread {
-  const id = mkId();
-  const anchor =
-    i % 5 === 0
-      ? { type: "image", src: `img/plate-${i}.png` }
-      : { type: "text", line: i * 3, blockId: id, quote: `anchored phrase number ${i}` };
-  const messages: ReviewMessage[] = Array.from({ length: (i % 4) + 1 }, (_, m) => ({
-    author: m % 2 === 0 ? "omar" : "claude",
-    ts: new Date(Date.UTC(2026, 8, 19, 10, i % 60, m % 60)).toISOString(),
-    body: POC4_BODIES[(i + m) % POC4_BODIES.length],
-  }));
-  return { id, anchor, resolved: i % 7 === 0, messages };
-}
 
 export default class ReviewMdPlugin extends Plugin {
   /** True while "comment mode" is armed: the reader is click-to-comment. */
@@ -272,12 +247,6 @@ export default class ReviewMdPlugin extends Plugin {
       id: "copy-reply-link",
       name: "Copy reply-link template for the selected thread",
       callback: () => void this.copyFocusedThreadLink("reply"),
-    });
-
-    this.addCommand({
-      id: "poc4-seed-verify-frontmatter",
-      name: "POC-4 seed & verify frontmatter threads",
-      callback: () => void this.runPoc4(),
     });
 
     // POC-6: augmented mermaid render. Obsidian renders mermaid through its own
@@ -1517,8 +1486,9 @@ export default class ReviewMdPlugin extends Plugin {
     else new Notice("review-md: open the comments sidebar and select a thread first");
   }
 
-  /** POC-1: resolve + open the target file, jump to a thread's ^blockId, and self-report. */
-  private async handleUri(op: XcallbackOperation, params: Record<string, string>): Promise<void> {
+  /** Resolve + open the target file and, when a thread param is present, jump to
+   *  its `^blockId`. Backs the `open` x-callback action. */
+  private async handleUri(_op: XcallbackOperation, params: Record<string, string>): Promise<void> {
     const af = this.resolveFile(params.file);
 
     const leaf = this.app.workspace.getLeaf(false);
@@ -1527,60 +1497,8 @@ export default class ReviewMdPlugin extends Plugin {
     if (params.thread) {
       this.app.workspace.openLinkText(`${af.path}#^${params.thread}`, af.path, false);
     }
-
-    const report =
-      `# POC-1 report\n\n- **RESULT: PASS** — protocol handler fired and opened the file.\n` +
-      `- opened: \`${af.path}\`\n- thread param: \`${params.thread ?? "(none)"}\`\n` +
-      `- action: \`${op.action}\`\n- x-success: \`${params["x-success"] ?? "(none)"}\`\n` +
-      `- at: ${new Date().toISOString()}\n`;
-    await this.writeVaultFile("POC-1-report.md", report);
-    new Notice("review-md POC-1: opened " + af.path + " — see POC-1-report.md");
   }
 
-  /** POC-4: write POC4_THREADS threads to the active file's frontmatter, read back, verify. */
-  private async runPoc4(): Promise<void> {
-    const file = this.app.workspace.getActiveFile();
-    if (!file) { new Notice("POC-4: open a markdown file first"); return; }
-
-    const threads = Array.from({ length: POC4_THREADS }, (_, i) => makePoc4Thread(i));
-    const totalMessages = threads.reduce((n, t) => n + t.messages.length, 0);
-
-    const t0 = performance.now();
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
-      fm.review = { ...(fm.review ?? {}), uid: (fm.review?.uid as string) ?? mkId() + mkId(), threads };
-    });
-    const writeMs = performance.now() - t0;
-
-    // Read back through a no-op processFrontMatter (authoritative, not the cache).
-    let readBack: ReviewThread[] = [];
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
-      readBack = (fm.review?.threads as ReviewThread[]) ?? [];
-    });
-
-    const countOk = readBack.length === POC4_THREADS;
-    const sampleIn = threads.find((t) => t.messages.some((m) => m.body.includes("ū")));
-    const sampleOut = readBack.find((t) => t.id === sampleIn?.id);
-    const bodyOk =
-      !!sampleIn && !!sampleOut &&
-      sampleIn.messages.map((m) => m.body).join("|") === sampleOut.messages.map((m) => m.body).join("|");
-
-    const size = (await this.app.vault.read(file)).length;
-    const pass = countOk && bodyOk;
-
-    const report =
-      `# POC-4 report\n\n- **RESULT: ${pass ? "PASS" : "FAIL"}**\n` +
-      `- target file: \`${file.path}\`\n` +
-      `- threads written / read back: ${POC4_THREADS} / ${readBack.length} ${countOk ? "✓" : "✗"}\n` +
-      `- total messages: ${totalMessages}\n` +
-      `- unicode+newline body round-trip: ${bodyOk ? "OK ✓" : "DIVERGED ✗"}\n` +
-      `- processFrontMatter write time: ${writeMs.toFixed(1)} ms\n` +
-      `- resulting file size: ${size} bytes\n` +
-      `- at: ${new Date().toISOString()}\n\n` +
-      `> Also check by eye: does the Properties panel stay usable with ${POC4_THREADS} threads?\n` +
-      `> Record that observation in docs/pocs/poc-4-frontmatter.md.\n`;
-    await this.writeVaultFile("POC-4-report.md", report);
-    new Notice(`review-md POC-4: ${pass ? "PASS" : "FAIL"} — see POC-4-report.md`);
-  }
 
   /**
    * Does thread `t` apply to a diagram with this source? True when it's a
@@ -1862,12 +1780,6 @@ export default class ReviewMdPlugin extends Plugin {
       g.append(title, circle, text);
       path.parentNode.appendChild(g);
     }
-  }
-
-  private async writeVaultFile(path: string, content: string): Promise<void> {
-    const existing = this.app.vault.getAbstractFileByPath(path);
-    if (existing instanceof TFile) await this.app.vault.modify(existing, content);
-    else await this.app.vault.create(path, content);
   }
 
   /** Every ```mermaid fence's source in a file (fences stripped). */

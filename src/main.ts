@@ -1105,12 +1105,12 @@ export default class ReviewMdPlugin extends Plugin {
     const abs = nodePath.join(basePath, file.path);
     const dir = nodePath.dirname(abs);
     // maxBuffer bumped so `git show` of a large file isn't truncated.
-    const run = (args: string[], trim = true): Promise<string | null> =>
+    const exec = (cwd: string, args: string[], trim = true): Promise<string | null> =>
       new Promise((res) => {
         try {
           cp.execFile(
             "git",
-            ["-C", dir, ...args],
+            ["-C", cwd, ...args],
             { timeout: 4000, maxBuffer: 16 * 1024 * 1024 },
             (err: unknown, out: string) => res(err ? null : trim ? String(out).trim() : String(out)),
           );
@@ -1118,8 +1118,17 @@ export default class ReviewMdPlugin extends Plugin {
           res(null);
         }
       });
-    const root = await run(["rev-parse", "--show-toplevel"]);
+    // Probe for the repo root from the file's own directory, then run every real
+    // command FROM that root. `rel` is repo-root-relative, and git resolves a
+    // pathspec relative to cwd — so running from a subfolder (e.g. docs/designs)
+    // made `-- docs/designs/design.md` match nothing and silently emptied the
+    // revision history for any file not at the vault root. Tree-ish forms
+    // (`HEAD:<rel>`, `<commit>:<rel>`) always resolve from the root, which masked
+    // the bug until a nested doc's `--follow` log came back empty. See
+    // docs/issues/git-pathspec-cwd.md.
+    const root = await exec(dir, ["rev-parse", "--show-toplevel"]);
     if (!root) return null;
+    const run = (args: string[], trim = true): Promise<string | null> => exec(root, args, trim);
     return { run, rel: nodePath.relative(root, abs) };
   }
 

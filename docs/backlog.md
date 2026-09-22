@@ -19,8 +19,10 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
   sample-plugin `console.log`s and the two inline `.style.cursor` assignments are
   gone, and the POC-4 dev command + the POC-1/POC-4 vault-report writers were
   removed so no dev scaffolding ships. `isDesktopOnly: true` and command naming
-  already correct. Only soft item left: the badge palette uses a few hard-coded
-  hex amber values instead of theme CSS variables (cosmetic). Ready to submit;
+  already correct. The last soft item — the badge palette's hard-coded amber
+  hex — is now centralised into theme-aware CSS variables (sidebar chips follow
+  light/dark; the diagram amber stays fixed-light because the mermaid canvas is
+  light in both themes). No soft items remain. Ready to submit;
   until it lands, BRAT (`omars-lab/review-md`) is the install path. Requested
   2026-09-21. ROI: high value (widest reach, best UX), gated only on Obsidian's
   review turnaround (days–weeks).

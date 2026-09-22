@@ -12,9 +12,11 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
   (plugin guidelines: no `innerHTML`/`outerHTML` assignment, proper `onunload`
   teardown, `isDesktopOnly` honoured, no network calls without disclosure, etc.),
   and a tagged GitHub release (already automated via `make release`). Pre-req cleanup
-  before submitting: the audit's open findings — esp. **#1 MutationObserver +
-  MarkdownView leak on closed tabs** (lifecycle teardown is exactly what reviewers
-  check) — plus a scan for any `innerHTML` usage. Until this lands, BRAT
+  before submitting: the audit's open findings — **#1 MutationObserver +
+  MarkdownView leak on closed tabs** is now **fixed** (teardown tied to
+  `view.register` instead of `Plugin.register`; see
+  [`docs/issues/augmenter-view-lifecycle-leak.md`](issues/augmenter-view-lifecycle-leak.md))
+  — plus a scan for any `innerHTML` usage still to do. Until this lands, BRAT
   (`omars-lab/review-md`) is the install path. Requested 2026-09-21. ROI: high value
   (widest reach, best UX) but gated on review turnaround (days–weeks) and the
   lifecycle fixes; do the hardening pass first, then submit.

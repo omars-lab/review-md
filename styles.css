@@ -1,4 +1,28 @@
 /* review-md styles — grows with the comment UI. */
+
+/* Comment amber — the marker colour for review-md's comment UI. Two surfaces,
+   two behaviours, so it stays legible in both themes:
+   - Sidebar chips (the node/edge type badge, the "hidden" filter chip) sit on
+     Obsidian's own background, so they follow the theme — a deeper set under the
+     dark theme blends with the dark sidebar instead of a bright pale pill.
+   - Diagram amber (the overlay badges and the recoloured commented node) sits on
+     the mermaid canvas, which Obsidian renders light — dark labels on light
+     fills — in BOTH themes. So it stays a fixed light amber; a dark fill would
+     hide mermaid's own dark node label. */
+body {
+  --review-md-amber-bg: #fff3bf;
+  --review-md-amber-line: #f0c000;
+  --review-md-amber-text: #5c3d00;
+  --review-md-diagram-amber-bg: #fff3bf;
+  --review-md-diagram-amber-line: #f0c000;
+  --review-md-diagram-amber-text: #5c3d00;
+}
+body.theme-dark {
+  --review-md-amber-bg: #463500;
+  --review-md-amber-line: #d9b310;
+  --review-md-amber-text: #ffe9a8;
+}
+
 .review-md-thread-badge {
   cursor: pointer;
 }
@@ -129,9 +153,9 @@
 }
 /* The "hidden" chip, when active, tints amber to echo the drift/outdated cue. */
 .review-md-chip[data-cat="hidden"].is-active {
-  color: #7a5600;
-  background: #fff3bf;
-  border-color: #f0c000;
+  color: var(--review-md-amber-text);
+  background: var(--review-md-amber-bg);
+  border-color: var(--review-md-amber-line);
 }
 
 /* A card filtered out by the chips. */
@@ -192,9 +216,9 @@
    recoloured node/edge in the diagram. */
 .review-md-type-badge[data-type="node"],
 .review-md-type-badge[data-type="edge"] {
-  color: #5c3d00;
-  background: #fff3bf;
-  border-color: #f0c000;
+  color: var(--review-md-amber-text);
+  background: var(--review-md-amber-bg);
+  border-color: var(--review-md-amber-line);
 }
 
 /* Share — top-right icon on each card (moved out of the action row). */
@@ -515,13 +539,13 @@ body.review-md-comment-mode .markdown-preview-view * {
 }
 .review-md-edge-badge circle,
 .review-md-node-badge circle {
-  fill: #fff3bf;
-  stroke: #f0c000;
+  fill: var(--review-md-diagram-amber-bg);
+  stroke: var(--review-md-diagram-amber-line);
   stroke-width: 1.5px;
 }
 .review-md-edge-badge text,
 .review-md-node-badge text {
-  fill: #5c3d00;
+  fill: var(--review-md-diagram-amber-text);
   font-size: 11px;
   font-weight: 600;
   pointer-events: none;
@@ -543,8 +567,8 @@ g.node.review-md-commented > rect,
 g.node.review-md-commented > polygon,
 g.node.review-md-commented > circle,
 g.node.review-md-commented > path {
-  fill: #fff3bf !important;
-  stroke: #f0c000 !important;
+  fill: var(--review-md-diagram-amber-bg) !important;
+  stroke: var(--review-md-diagram-amber-line) !important;
   stroke-width: 2px !important;
 }
 

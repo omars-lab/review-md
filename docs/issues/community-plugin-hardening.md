@@ -52,11 +52,29 @@ dev-only scaffolding shipped). One place to see everything the pass touched.
   commands (`open-comments-view`, `toggle-comment-mode`, the three copy-link
   commands, `bake-mermaid-comments`, `toggle-mermaid-comments`) are present.
 
+## Badge palette → theme-aware CSS variables (done)
+
+The comment amber (the marker colour that ties a badge to its node/edge/chip)
+was five scattered hard-coded hex values in `styles.css` (`#fff3bf` fill,
+`#f0c000` line, `#5c3d00`/`#7a5600` text). Centralised into named CSS variables
+at the top of the file, with a **split** that fell out of looking at the actual
+render in both themes:
+
+- **Sidebar chips** (the node/edge type badge, the "hidden" filter chip) sit on
+  Obsidian's own background, so they get a `body.theme-dark` override
+  (`--review-md-amber-*`) — a deeper amber with light text that blends with the
+  dark sidebar instead of a bright pale pill.
+- **Diagram amber** (the overlay badges + the recoloured commented node) sits on
+  the mermaid canvas, which Obsidian renders **light** (dark `#333` labels on
+  light fills) in *both* themes — verified live: every node, commented or not,
+  computed a `#333` label. So the diagram amber is a **fixed** light set
+  (`--review-md-diagram-amber-*`); a naive full theme-flip made the node dark
+  under its own dark label (dark-on-dark, unreadable). Verified the split live:
+  dark theme → sidebar pill `#463500`/light text, diagram node stays `#fff3bf`.
+
 ## Still open before submitting
 
 The manifest is already correct (`isDesktopOnly: true` — the plugin shells out
-to `git` via `child_process`; command names carry no plugin-name prefix). The
-remaining softer item is the badge palette in `styles.css` using a few
-hard-coded amber hex values rather than theme CSS variables — cosmetic, not a
-hard reject. The submission itself (PR to `obsidianmd/obsidian-releases` +
+to `git` via `child_process`; command names carry no plugin-name prefix). No
+soft items remain. The submission itself (PR to `obsidianmd/obsidian-releases` +
 tagged release) is tracked in [`../backlog.md`](../backlog.md).

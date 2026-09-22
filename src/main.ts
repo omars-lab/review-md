@@ -194,7 +194,6 @@ export default class ReviewMdPlugin extends Plugin {
   private rvAugmenting = new WeakSet<HTMLElement>();
 
   async onload(): Promise<void> {
-    console.log("[review-md] loaded");
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 
     // One Obsidian action per operation: obsidian://review-md-open?..., review-md-reply?...
@@ -584,7 +583,6 @@ export default class ReviewMdPlugin extends Plugin {
   }
 
   onunload(): void {
-    console.log("[review-md] unloaded");
     document.body.removeClass("review-md-comment-mode");
     // Views closed during the session were cleaned by their own `view.register`.
     // Any still-open markdown view's observer must be disconnected here — walk the
@@ -1794,7 +1792,6 @@ export default class ReviewMdPlugin extends Plugin {
       const pos = nodeShapeTopRight(g);
       badge.setAttribute("transform", `translate(${pos.x}, ${pos.y})`);
       (badge as unknown as HTMLElement).dataset.node = node;
-      badge.style.cursor = "pointer";
       const circle = document.createElementNS(ns, "circle");
       circle.setAttribute("r", "11");
       const text = document.createElementNS(ns, "text");
@@ -1852,7 +1849,6 @@ export default class ReviewMdPlugin extends Plugin {
       g.setAttribute("class", "review-md-edge-badge" + (allResolved ? " is-resolved" : ""));
       g.setAttribute("transform", `translate(${mid.x}, ${mid.y})`);
       (g as unknown as HTMLElement).dataset.edge = edgeKey;
-      g.style.cursor = "pointer";
       const circle = document.createElementNS(ns, "circle");
       circle.setAttribute("r", "11");
       const text = document.createElementNS(ns, "text");

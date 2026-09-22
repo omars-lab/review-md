@@ -78,6 +78,20 @@ count and filter open / hidden / resolved.
   <img src="docs/media/filter-chips.png" alt="Open, hidden, and resolved filter chips" width="360">
 </p>
 
+### Filter by revision & recover the reviewed text
+
+A **Revisions** dropdown in the panel header pins the list to comments authored
+against one version of the doc (`v7 (sha)`, the working copy, All). Each card ends
+in a collapsed **Content Revisions** accordion — expand it to see the passage *as it
+was when the comment was made* (pulled from git when the thread is stamped to a
+commit, or the stored quote when there's no git history behind it).
+
+<p align="center">
+  <img src="docs/media/revisions-panel.png" alt="Comments panel with the Revisions filter in the header and an expanded Content Revisions accordion" width="300">
+  &nbsp;&nbsp;
+  <img src="docs/media/content-revisions.png" alt="An expanded Content Revisions accordion revealing the reviewed text" width="360">
+</p>
+
 ---
 
 ## Install

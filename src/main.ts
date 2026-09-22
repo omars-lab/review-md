@@ -1203,22 +1203,15 @@ export default class ReviewMdPlugin extends Plugin {
   }
 
   /**
-   * The reviewed version's body (frontmatter stripped) via
-   * `git show <commit>:<relpath>`, or null when there's no git stamp / retrieval
-   * fails. The sidebar falls back to the stored anchor quote in that case.
-   *
-   * A WORKING_REV thread was reviewed against the uncommitted working tree, which
-   * isn't in any commit. While it's still current (not outdated) the working tree
-   * *is* the reviewed body, so read the file; once it drifts that content is gone
-   * (it was never committed) → null, and the sidebar shows the stored quote.
+   * The file's body (frontmatter stripped) as of an arbitrary revision — a git
+   * commit sha, or WORKING_REV for the current working tree — following renames
+   * so an old path still resolves. null when there's no git access or the file
+   * didn't exist at that commit. Powers the card's version stepper, which browses
+   * the anchored content across the file's history; it takes a bare revision key
+   * and applies no thread-specific outdated check.
    */
-  async reviewedBodyFor(file: TFile, thread: ReviewThread): Promise<string | null> {
-    const commit = thread.rev?.git?.commit;
-    if (!commit) return null;
-    if (commit === WORKING_REV) {
-      if (await this.isThreadOutdated(file, thread)) return null;
-      return stripFrontmatter(await this.app.vault.read(file));
-    }
+  async bodyAtRevision(file: TFile, commit: string): Promise<string | null> {
+    if (commit === WORKING_REV) return stripFrontmatter(await this.app.vault.read(file));
     const ctx = await this.gitContext(file);
     if (!ctx) return null;
     const direct = await ctx.run(["show", `${commit}:${ctx.rel}`], false);
@@ -1900,18 +1893,14 @@ export default class ReviewMdPlugin extends Plugin {
   }
 
   /**
-   * A mermaid preview source for a node/edge thread built from the version the
-   * comment was reviewed against (via `reviewedBodyFor` → git), so the Content
-   * Revisions accordion can render the diagram *as it was then* instead of the
-   * node's bare text id. Returns null for non-mermaid anchors, or when the
-   * reviewed body isn't recoverable (no git history / drifted working copy) — the
-   * caller then falls back to the stored quote.
+   * Build a node/edge preview source from an already-fetched body — the version
+   * stepper's per-revision path, where the body comes from `bodyAtRevision`
+   * rather than the thread's own stamp. null for non-mermaid anchors or when the
+   * element isn't in that version's diagram.
    */
-  async reviewedMermaidPreviewSource(file: TFile, thread: ReviewThread): Promise<string | null> {
+  mermaidPreviewSourceFromBody(body: string, thread: ReviewThread): string | null {
     const type = (thread.anchor as { type?: string })?.type;
     if (type !== "mermaidNode" && type !== "mermaidEdge") return null;
-    const body = await this.reviewedBodyFor(file, thread);
-    if (body === null) return null;
     const blocks = mermaidBlocksFrom(body);
     return type === "mermaidEdge"
       ? this.edgePreviewFromBlocks(blocks, thread)

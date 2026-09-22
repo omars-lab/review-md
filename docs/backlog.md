@@ -11,18 +11,19 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
   plugin to `community-plugins.json`, passing Obsidian's automated + human review
   (plugin guidelines: no `innerHTML`/`outerHTML` assignment, proper `onunload`
   teardown, `isDesktopOnly` honoured, no network calls without disclosure, etc.),
-  and a tagged GitHub release (already automated via `make release`). Pre-req cleanup
-  before submitting: the audit's open findings — **#1 MutationObserver +
-  MarkdownView leak on closed tabs** is now **fixed** (teardown tied to
-  `view.register` instead of `Plugin.register`; see
-  [`docs/issues/augmenter-view-lifecycle-leak.md`](issues/augmenter-view-lifecycle-leak.md))
-  — and the `innerHTML` scan is **done**: the only two assignments (both the
-  mermaid-preview SVG inject) now parse the SVG via `DOMParser` and adopt the
-  `<svg>` node through a shared `setSvg` helper, no `innerHTML`/`outerHTML` left
-  in `src/`. Until this lands, BRAT
-  (`omars-lab/review-md`) is the install path. Requested 2026-09-21. ROI: high value
-  (widest reach, best UX) but gated on review turnaround (days–weeks) and the
-  lifecycle fixes; do the hardening pass first, then submit.
+  and a tagged GitHub release (already automated via `make release`). **The
+  hardening pass is done** — full record in
+  [`docs/issues/community-plugin-hardening.md`](issues/community-plugin-hardening.md):
+  the `MutationObserver`/`MarkdownView` leak (audit #1) is fixed, the two
+  `innerHTML` SVG injects now go through a `DOMParser`-based `setSvg` helper, the
+  sample-plugin `console.log`s and the two inline `.style.cursor` assignments are
+  gone, and the POC-4 dev command + the POC-1/POC-4 vault-report writers were
+  removed so no dev scaffolding ships. `isDesktopOnly: true` and command naming
+  already correct. Only soft item left: the badge palette uses a few hard-coded
+  hex amber values instead of theme CSS variables (cosmetic). Ready to submit;
+  until it lands, BRAT (`omars-lab/review-md`) is the install path. Requested
+  2026-09-21. ROI: high value (widest reach, best UX), gated only on Obsidian's
+  review turnaround (days–weeks).
 
 - ~~**Make `docs/` the tracked Obsidian dev vault so Revisions v-numbers render**~~ —
   **DONE 2026-09-21.** `git mv design.md → docs/designs/design.md` (history preserved),

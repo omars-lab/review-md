@@ -39,6 +39,41 @@ node scripts/capture-media.mjs reload        # load the freshly-built bundle int
 land in `docs/media/` — that directory **is committed** (README images have to ship
 in the repo to render on GitHub); the vault config `docs/.obsidian/` stays gitignored.
 
+## 0b. When the harness can't reach it — drive the GUI by hand
+
+`capture-media` talks to a *running, trusted* vault. Two setup steps have **no
+scripted path** and need real GUI driving (see the CLAUDE.md "Manual computer use"
+rule for the general discipline: screenshot before *and* after every click, convert
+display→screen points, watch for TCC overlays):
+
+- **The harness Obsidian is an isolated instance.** It's launched with a custom
+  `--user-data-dir`, so its vault registry is `<user-data-dir>/obsidian.json` — **not**
+  your normal `~/Library/Application Support/obsidian/obsidian.json`. `obsidian://open`
+  and the vault switcher only know vaults listed there. To point the harness at the
+  real `docs/` vault, add an entry (a 16-hex id → `{path, ts, open:true}`) and set the
+  old vault `open:false`. The registry is **cached in memory** — quit and relaunch
+  Obsidian for the edit to take:
+  ```
+  open -na "Obsidian" --args --user-data-dir=<the-harness-user-data-dir>
+  ```
+- **First-run "Do you trust the author of this vault?" dialog.** Its buttons are
+  Electron web content, not native AX, so `osascript … click button` fails. Front the
+  window and click by coordinate:
+  ```
+  osascript -e 'tell application "Obsidian" to activate'
+  screencapture -o -x /tmp/s.png          # then read /tmp/s.png, find the button
+  /opt/homebrew/bin/cliclick c:910,541     # "Trust author and enable plugins" (screen pts)
+  screencapture -o -x /tmp/s2.png          # confirm the dialog is gone + plugin enabled
+  ```
+  Verify the plugin actually loaded before capturing:
+  ```
+  node scripts/capture-media.mjs eval --vault docs \
+    --code '(() => JSON.stringify({base: app.vault.adapter.basePath, hasPlugin: !!app.plugins.plugins["review-md"]}))()'
+  ```
+
+Once the vault is trusted and the plugin reports loaded, everything below (`cmd`,
+`eval`, `open`, `shot`) works normally.
+
 ## 1. The tool — one subcommand per primitive
 
 `scripts/capture-media.mjs <sub> [flags]` (full flag list in the file header):

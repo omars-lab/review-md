@@ -158,7 +158,56 @@ body.theme-dark {
   border-color: var(--review-md-amber-line);
 }
 
-/* A card filtered out by the chips. */
+/* Tools row (search · sort) — its own full-width line under the chips so the
+   search box gets the room a narrow sidebar has. */
+.review-md-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  flex: 1 1 100%;
+}
+.review-md-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  height: auto;
+  padding: 2px var(--size-2-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+.review-md-search:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: none;
+}
+/* Sort menu button: same compact chrome as the Revisions dropdown. */
+.review-md-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  padding: 1px var(--size-2-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: none;
+  height: auto;
+}
+.review-md-sort:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border-hover);
+}
+.review-md-sort .svg-icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* A card filtered out by the chips or the search box. */
 .review-md-thread.is-filtered-out {
   display: none;
 }
@@ -253,8 +302,37 @@ body.theme-dark {
   padding: var(--size-4-1) 0;
   border-top: 1px solid var(--background-modifier-border-hover);
 }
-.review-md-message:first-child {
+.review-md-message:first-child,
+.review-md-fold + .review-md-message {
   border-top: none;
+}
+/* Fold toggle ("Show N earlier" / "Hide earlier") at the head of a multi-
+   message thread: a quiet text button; the chevron turns when open. */
+.review-md-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  padding: 0 var(--size-2-1);
+  margin: 0 0 var(--size-2-1);
+  height: auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+.review-md-fold:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+.review-md-fold .svg-icon {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.1s ease;
+}
+.review-md-fold.is-open .review-md-fold-icon .svg-icon {
+  transform: rotate(90deg);
 }
 .review-md-meta {
   display: flex;

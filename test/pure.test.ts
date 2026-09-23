@@ -34,6 +34,12 @@ import {
   mermaidBlocksFrom,
   effectiveReviewer,
   diffThreads,
+  threadMatches,
+  sortThreads,
+  latestTs,
+  anchorLineIn,
+  startsFolded,
+  FOLD_OVER,
 } from "../src/pure.ts";
 import type { ThreadLike } from "../src/pure.ts";
 
@@ -304,4 +310,149 @@ test("diffThreads treats a missing rev and an absent rev as equal", () => {
   const b = thread("t1");
   delete (b as { rev?: unknown }).rev;
   assert.deepEqual(diffThreads([a], [b]), { added: [], removed: [], changed: [] });
+});
+
+// ---- Comments panel: search / sort / position / fold ----
+
+test("threadMatches: empty or blank query matches everything", () => {
+  assert.equal(threadMatches(thread("t1"), ""), true);
+  assert.equal(threadMatches(thread("t1"), "   "), true);
+});
+
+test("threadMatches is a case-insensitive substring over body, author, anchor text and type label", () => {
+  const t = thread("t1", {
+    anchor: { type: "mermaidEdge", from: "URL", to: "PH", quote: "URL → PH" },
+    messages: [{ author: "Omar", ts: "1", body: "does the Handler validate the vault?" }],
+  });
+  assert.equal(threadMatches(t, "handler"), true); // body
+  assert.equal(threadMatches(t, "OMAR"), true); // author
+  assert.equal(threadMatches(t, "url → ph"), true); // anchor quote
+  assert.equal(threadMatches(t, "edge"), true); // type label (mermaidEdge → "edge")
+  assert.equal(threadMatches(t, "t1"), true); // id
+  assert.equal(threadMatches(t, "sidecar"), false);
+});
+
+test("latestTs is the newest message stamp, else rev.ts, else 0", () => {
+  const t = thread("t1", {
+    messages: [
+      { author: "a", ts: "2026-09-19T10:00:00Z", body: "" },
+      { author: "b", ts: "2026-09-21T10:00:00Z", body: "" },
+      { author: "c", ts: "2026-09-20T10:00:00Z", body: "" },
+    ],
+  });
+  assert.equal(latestTs(t), Date.parse("2026-09-21T10:00:00Z"));
+  assert.equal(latestTs(thread("t2", { messages: [], rev: { ts: "2026-09-01T00:00:00Z" } })), Date.parse("2026-09-01T00:00:00Z"));
+  assert.equal(latestTs(thread("t3", { messages: [], rev: undefined })), 0);
+});
+
+/** Four threads: t1 oldest, t3 newest, t2 resolved (and newer than t1), t4 by another author. */
+function sample(): ThreadLike[] {
+  return [
+    thread("t1", { messages: [{ author: "omar", ts: "2026-09-19T10:00:00Z", body: "" }] }),
+    thread("t2", { resolved: true, messages: [{ author: "omar", ts: "2026-09-19T12:00:00Z", body: "" }] }),
+    thread("t3", { messages: [{ author: "omar", ts: "2026-09-19T11:00:00Z", body: "" }] }),
+    thread("t4", { messages: [{ author: "claude", ts: "2026-09-19T10:30:00Z", body: "" }] }),
+  ];
+}
+const ids = (ts: ThreadLike[]) => ts.map((t) => t.id);
+
+test("sortThreads recency: newest activity first, resolved threads always last", () => {
+  assert.deepEqual(ids(sortThreads(sample(), "recency")), ["t3", "t4", "t1", "t2"]);
+  // A reply on the oldest thread bumps it to the top.
+  const s = sample();
+  s[0].messages.push({ author: "claude", ts: "2026-09-19T13:00:00Z", body: "reply" });
+  assert.deepEqual(ids(sortThreads(s, "recency")), ["t1", "t3", "t4", "t2"]);
+});
+
+test("sortThreads position: by anchor line, unknown positions last, resolved after open", () => {
+  const positions = new Map([
+    ["t1", 40],
+    ["t3", 5],
+    ["t2", 1],
+  ]);
+  assert.deepEqual(ids(sortThreads(sample(), "position", positions)), ["t3", "t1", "t4", "t2"]);
+  // No positions at all → ties fall back to recency.
+  assert.deepEqual(ids(sortThreads(sample(), "position")), ["t3", "t4", "t1", "t2"]);
+});
+
+test("sortThreads author: first author A→Z (case-insensitive), then recency", () => {
+  assert.deepEqual(ids(sortThreads(sample(), "author")), ["t4", "t3", "t1", "t2"]);
+  const s = sample();
+  s[3].messages[0].author = "Zed";
+  assert.deepEqual(ids(sortThreads(s, "author")), ["t3", "t1", "t4", "t2"]);
+});
+
+test("sortThreads does not mutate its input", () => {
+  const s = sample();
+  sortThreads(s, "recency");
+  assert.deepEqual(ids(s), ["t1", "t2", "t3", "t4"]);
+});
+
+const BODY = [
+  "---", // 0
+  "title: x", // 1
+  "---", // 2
+  "# Design", // 3
+  "", // 4
+  "Intro paragraph mentioning CS in prose.", // 5
+  "", // 6
+  "```mermaid", // 7
+  "flowchart LR", // 8
+  "  URL[Link] --> PH[Protocol handler]", // 9
+  "  PH --> CS[Comment store]", // 10
+  "  CS --> MA[Mermaid augmenter]", // 11
+  "```", // 12
+  "", // 13
+  "## Storage ^h-store", // 14
+  "", // 15
+  "The sidecar holds every thread. ^blk-1", // 16
+  "", // 17
+  "![diagram](media/arch.png)", // 18
+  "See [the API](docs/api/index.md) for details.", // 19
+  "", // 20
+  "```mermaid", // 21
+  "stateDiagram-v2", // 22
+  "  Store --> Done", // 23
+  "```", // 24
+].join("\n");
+
+test("anchorLineIn text/header: block id first, then the quote, then the recorded line", () => {
+  assert.equal(anchorLineIn(BODY, { type: "text", blockId: "blk-1", quote: "gone" }), 16);
+  assert.equal(anchorLineIn(BODY, { type: "text", quote: "holds every thread" }), 16);
+  assert.equal(anchorLineIn(BODY, { type: "text", quote: "not in the doc", line: 3 }), 3);
+  assert.equal(anchorLineIn(BODY, { type: "text", quote: "not in the doc" }), null);
+  assert.equal(anchorLineIn(BODY, { type: "header", blockId: "h-store" }), 14);
+  assert.equal(anchorLineIn(BODY, { type: "header", quote: "Storage" }), 14);
+});
+
+test("anchorLineIn mermaidNode: first mention inside a mermaid fence, never prose", () => {
+  assert.equal(anchorLineIn(BODY, { type: "mermaidNode", node: "CS" }), 10); // line 5 is prose
+  assert.equal(anchorLineIn(BODY, { type: "mermaidNode", node: "PH" }), 9);
+  assert.equal(anchorLineIn(BODY, { type: "mermaidNode", node: "Store" }), 23); // second diagram
+  assert.equal(anchorLineIn(BODY, { type: "mermaidNode", node: "Nope" }), null);
+  assert.equal(anchorLineIn(BODY, { type: "mermaidNode", node: "C" }), null); // whole-word only
+});
+
+test("anchorLineIn mermaidEdge: the link line, else from's line in a fence that has both ends", () => {
+  assert.equal(anchorLineIn(BODY, { type: "mermaidEdge", from: "URL", to: "PH" }), 9);
+  assert.equal(anchorLineIn(BODY, { type: "mermaidEdge", from: "CS", to: "MA" }), 11);
+  // No such link, but both endpoints in the first fence → where `from` appears.
+  assert.equal(anchorLineIn(BODY, { type: "mermaidEdge", from: "MA", to: "URL" }), 11);
+  assert.equal(anchorLineIn(BODY, { type: "mermaidEdge", from: "URL", to: "Done" }), null);
+});
+
+test("anchorLineIn image and link: the source line, image by file name when src is an app URL", () => {
+  assert.equal(anchorLineIn(BODY, { type: "image", src: "media/arch.png" }), 18);
+  assert.equal(anchorLineIn(BODY, { type: "image", src: "app://obsidian/vault/media/arch.png?123" }), 18);
+  assert.equal(anchorLineIn(BODY, { type: "link", href: "docs/api/index.md" }), 19);
+  assert.equal(anchorLineIn(BODY, { type: "link", href: "https://elsewhere", quote: "the API" }), 19);
+  assert.equal(anchorLineIn(BODY, { type: "mystery" }), null);
+});
+
+test("startsFolded: resolved threads and threads longer than FOLD_OVER start folded", () => {
+  const msg = { author: "a", ts: "1", body: "" };
+  assert.equal(startsFolded(thread("t1")), false);
+  assert.equal(startsFolded(thread("t1", { resolved: true })), true);
+  assert.equal(startsFolded(thread("t1", { messages: Array(FOLD_OVER).fill(msg) })), false);
+  assert.equal(startsFolded(thread("t1", { messages: Array(FOLD_OVER + 1).fill(msg) })), true);
 });

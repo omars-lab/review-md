@@ -33,8 +33,11 @@ export class CommentsView extends ItemView {
   private plugin: ReviewMdPlugin;
   /** The file whose threads are currently shown (tracks the active markdown file). */
   private file: TFile | null = null;
-  /** Draft `author` used for replies sent from the sidebar. */
-  private author = "omar";
+  /** Author stamped on new sidebar-authored messages — the configured reviewer
+   *  name, or the generic "reviewer" fallback (never a specific person's name). */
+  private get author(): string {
+    return this.plugin.effectiveAuthor();
+  }
   /** Threads for `file`, loaded from its sidecar; render() paints from this cache. */
   private threads: ReviewThread[] = [];
   /** Current body hash of `file`, recomputed each render to flag stale threads. */

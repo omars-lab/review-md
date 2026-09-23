@@ -22,8 +22,12 @@ reviewing, and every thread is shareable and repliable through `obsidian://` lin
   (`header`), an image (`image`), or a Mermaid **node**/**edge** (`mermaidNode` /
   `mermaidEdge`). The thread anchors to *that element*, by block-id or diagram-node-id,
   so it survives re-layout and reflow.
+- ✍️ **Comment mode with a draft composer** — toggle comment mode (the status bar says
+  so), click an element, and a draft card with the anchor preview opens in the sidebar.
+  The thread is written only when you hit **Comment**; a mis-click costs nothing.
 - 🧵 **Threaded discussion** — every comment is a chat thread; you, a teammate, and an
-  agent (`claude`) reply in order, and **Resolve** closes it.
+  agent (`claude`) reply in order (⌘/Ctrl+Enter posts, bodies render as Markdown), and
+  **Resolve** closes it. Your reviewer name is a setting.
 - 🔗 **Share & reply by link** — any thread emits an `obsidian://review-md-open?…&thread=…`
   URL; a reply URL reopens the file focused on that thread. Full API in
   [`docs/api/xcallback.md`](docs/api/xcallback.md).
@@ -34,8 +38,11 @@ reviewing, and every thread is shareable and repliable through `obsidian://` lin
   and is flagged **outdated** only when the content *it* anchors to actually changes. An
   inline **version stepper** walks the anchored element back through every git revision,
   rendering it — diagram or text — exactly as it was in each version.
-- 🗂 **Triage sidebar** — cards carry a type badge and a version stepper; header chips
-  (**open · hidden · resolved**) filter the list.
+- 🗂 **Triage sidebar** — cards carry a type badge and a version stepper. The sticky
+  header filters with chips (**open · hidden · resolved**), searches across bodies,
+  authors and anchors, and sorts by **recency**, **doc position** or **author**; long
+  threads fold to their latest message (**Show N earlier**). Edits update the one card
+  they touch, so the list never jumps under you.
 - 📝 **Sidecar storage** — threads live in a git-tracked sibling `.<name>.comments.md`
   (YAML source of truth + a GitHub-legible body), so they diff cleanly and any CLI tool
   or agent can read them.
@@ -43,6 +50,16 @@ reviewing, and every thread is shareable and repliable through `obsidian://` lin
 ---
 
 ## See it
+
+### Create a thread: comment mode → click → draft → thread
+
+Toggle comment mode (the status bar shows it), click the rendered element, write in
+the draft card that opens in the sidebar, and hit **Comment**. Nothing is written until
+you do.
+
+<p align="center">
+  <img src="docs/media/comment-mode.gif" alt="Comment mode on, a click on the Architecture heading opens a draft composer in the sidebar, and Comment turns it into a focused thread" width="720">
+</p>
 
 ### Share & reply through a deep link (the x-callback path)
 
@@ -68,18 +85,27 @@ and the reply box — one self-contained thread.
   <img src="docs/media/mermaid-badges.png" alt="A Mermaid diagram with commented nodes recoloured and count badges" width="640">
 </p>
 
-### Version stepper & triage chips
+### Version stepper
 
 Each card's rev line is an inline stepper — `‹ vN (sha) ›` walks the anchored element
 through the file's git history (left = newer, right = older), rendering it **as it was**
 in each version. Here the `CS` node read *"… frontmatter"* at **v2** but *"… sidecar"*
-now — the very drift the thread was debating. The header chips count and filter open /
-hidden / resolved.
+now — the very drift the thread was debating.
 
 <p align="center">
   <img src="docs/media/version-stepper.png" alt="Inline version stepper: a mermaid node shown as it was at v2 (frontmatter) above its current version (sidecar)" width="360">
+</p>
+
+### Triage: chips, search, sort, fold
+
+The sticky header counts and filters open / hidden / resolved, searches every thread,
+and sorts by recency, doc position or author. Left: a search for `claude` in doc
+order. Right: a long thread folded to its latest message behind **Show 1 earlier**.
+
+<p align="center">
+  <img src="docs/media/search-sort.png" alt="The comments header with a search for claude and Doc position sort, three matching cards in document order" width="360">
   &nbsp;&nbsp;
-  <img src="docs/media/filter-chips.png" alt="Open, hidden, and resolved filter chips" width="360">
+  <img src="docs/media/thread-fold.png" alt="A thread card folded to its latest message with a Show 1 earlier button" width="360">
 </p>
 
 ---

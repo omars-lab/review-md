@@ -38,6 +38,10 @@ export class CommentsView extends ItemView {
   private get author(): string {
     return this.plugin.effectiveAuthor();
   }
+  /** A pending click anchor awaiting its first comment: while set, render() paints
+   *  a draft composer card at the top of the panel. Cleared on Comment or Cancel,
+   *  so a mis-click never writes an empty thread. See openDraftComposer. */
+  private draftAnchor: Record<string, unknown> | null = null;
   /** Threads for `file`, loaded from its sidecar; render() paints from this cache. */
   private threads: ReviewThread[] = [];
   /** Current body hash of `file`, recomputed each render to flag stale threads. */
@@ -134,6 +138,27 @@ export class CommentsView extends ItemView {
     card.querySelector<HTMLTextAreaElement>(".review-md-reply-input")?.focus();
   }
 
+  /** Begin composing a comment for a freshly-clicked anchor: paint a draft card at
+   *  the top of the panel and focus its input. Called by the plugin on a comment-
+   *  mode click, after the anchor is resolved (createThread runs only on Comment). */
+  beginDraft(file: TFile, anchor: Record<string, unknown>): void {
+    this.draftAnchor = anchor;
+    if (this.file?.path !== file.path) {
+      // Clicked in a file the panel wasn't showing yet — load its threads first,
+      // then paint the draft on top of them.
+      this.file = file;
+      void this.refresh().then(() => this.focusDraft());
+    } else {
+      this.render();
+      this.focusDraft();
+    }
+  }
+
+  /** Focus the draft composer's textarea (after it's painted). */
+  private focusDraft(): void {
+    this.contentEl.querySelector<HTMLTextAreaElement>(".review-md-draft .review-md-reply-input")?.focus();
+  }
+
   /** Mark a thread as the selected one (target of the copy-link commands). */
   private setFocused(threadId: string): void {
     this.focusedThreadId = threadId;
@@ -214,11 +239,17 @@ export class CommentsView extends ItemView {
       };
     }
 
+    // A pending draft (from a click in comment mode) leads the panel — its own card
+    // with the anchor preview and a focused composer, above any existing threads.
+    if (this.draftAnchor) this.renderDraft(root);
+
     if (threads.length === 0) {
-      root.createEl("p", {
-        cls: "review-md-empty",
-        text: "No comment threads yet — turn on comment mode and click the document.",
-      });
+      if (!this.draftAnchor) {
+        root.createEl("p", {
+          cls: "review-md-empty",
+          text: "No comment threads yet — turn on comment mode and click the document.",
+        });
+      }
       return;
     }
 
@@ -506,6 +537,91 @@ export class CommentsView extends ItemView {
       window.clearTimeout(armTimer);
       onConfirm();
     };
+  }
+
+  /**
+   * The draft composer card: the anchor preview (reusing the same node/edge/text/
+   * link/image renderers as a real thread card) plus a focused input with Comment
+   * and Cancel. The thread is written to the sidecar only on Comment (authored with
+   * the effective reviewer name); Cancel discards it with no sidecar write.
+   */
+  private renderDraft(root: HTMLElement): void {
+    const file = this.file;
+    const anchor = this.draftAnchor;
+    if (!file || !anchor) return;
+    // A thread-shaped view of the pending anchor so the existing anchor-preview
+    // renderers (which read `.anchor`) work unchanged — never written to the sidecar.
+    const draft = { id: "__draft__", anchor, resolved: false, messages: [] } as ReviewThread;
+
+    const card = root.createDiv({ cls: "review-md-thread review-md-draft is-focused" });
+    const top = card.createDiv({ cls: "review-md-thread-top" });
+    top.createEl("span", {
+      cls: "review-md-type-badge",
+      text: anchorTypeLabel(anchor),
+      attr: { "data-type": anchorTypeLabel(anchor), title: describeAnchor(anchor) },
+    });
+    top.createEl("span", { cls: "review-md-draft-tag", text: "new comment" });
+
+    const type = (anchor as { type?: string }).type;
+    if (type === "mermaidNode" || type === "mermaidEdge") this.renderMermaidPreview(card, draft);
+    else if (type === "text") this.renderTextPreview(card, draft);
+    else if (type === "link") this.renderLinkPreview(card, draft);
+    else if (type === "image") this.renderImagePreview(card, draft);
+
+    const box = card.createDiv({ cls: "review-md-reply" });
+    const ta = box.createEl("textarea", {
+      cls: "review-md-reply-input",
+      attr: { rows: "3", placeholder: "Comment… (⌘/Ctrl+Enter to post, Esc to cancel)" },
+    });
+
+    const submit = async (): Promise<void> => {
+      const body = ta.value.trim();
+      if (!body) {
+        new Notice("review-md: comment is empty");
+        return;
+      }
+      // Clear the draft before the write so the refresh it triggers doesn't repaint
+      // a stale composer over the newly-created thread.
+      this.draftAnchor = null;
+      try {
+        const id = await this.plugin.createThread(file, anchor, { author: this.author, body });
+        new Notice(`review-md: new thread ${id}`);
+        await this.focusThread(id);
+      } catch (err) {
+        new Notice(`review-md: ${String(err)}`);
+      }
+    };
+    const cancel = (): void => {
+      this.draftAnchor = null;
+      this.render();
+    };
+
+    // Same keyboard pattern as the reply/edit boxes: ⌘/Ctrl+Enter posts, Escape cancels.
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        void submit();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        cancel();
+      }
+    });
+
+    const actions = box.createDiv({ cls: "review-md-actions" });
+    const commentBtn = labeledButton(actions, "message-square", "Comment", "mod-cta");
+    commentBtn.onclick = () => void submit();
+    const cancelBtn = labeledButton(actions, "x", "Cancel");
+    cancelBtn.onclick = cancel;
+  }
+
+  /** Inline preview for an image anchor: its source path (the DOM src is an
+   *  app:// / URL, so show the path rather than re-fetching the asset). */
+  private renderImagePreview(card: HTMLElement, thread: ReviewThread): void {
+    const raw = (thread.anchor as { src?: unknown }).src;
+    const src = typeof raw === "string" ? raw.trim() : "";
+    if (!src) return;
+    const box = card.createDiv({ cls: "review-md-link-preview" });
+    box.createEl("code", { cls: "review-md-link-href", text: middleEllipsis(src) });
   }
 
   /** Render the highlighted passage as a small blockquote that fits the card. */

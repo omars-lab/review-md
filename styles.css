@@ -589,6 +589,29 @@ body.review-md-comment-mode .markdown-preview-view * {
 .side-dock-ribbon-action.is-active {
   color: var(--text-accent);
 }
+/* Status-bar indicator shown only while comment mode is armed. */
+.status-bar-item.review-md-status {
+  color: var(--text-accent);
+  font-weight: var(--font-semibold);
+}
+
+/* ---- Draft composer (a click in comment mode → compose before writing) ---- */
+/* Reuses the thread card, tinted with the accent so it reads as "not saved yet". */
+.review-md-thread.review-md-draft {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+  background: var(--background-primary-alt);
+}
+.review-md-draft-tag {
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-radius: var(--radius-s);
+  padding: 0 var(--size-4-1);
+}
 
 /* ---- Flash highlight (bidirectional link: click a thread → find its region) ---- */
 .review-md-flash {

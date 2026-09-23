@@ -157,6 +157,9 @@ export default class ReviewMdPlugin extends Plugin {
   /** True while "comment mode" is armed: the reader is click-to-comment. */
   private commentMode = false;
   private commentRibbon: HTMLElement | null = null;
+  /** Status-bar indicator shown only while comment mode is armed, so the reader
+   *  can tell the plugin owns their clicks (the reading view looks native otherwise). */
+  private commentStatus: HTMLElement | null = null;
   settings: ReviewMdSettings = { ...DEFAULT_SETTINGS };
   /** Live Preview mermaid augmenter state. Markdown post-processors never fire in
    *  the CM6 editor (only in reading view / fully-rendered embeds), so the overlay
@@ -584,6 +587,8 @@ export default class ReviewMdPlugin extends Plugin {
 
   onunload(): void {
     document.body.removeClass("review-md-comment-mode");
+    this.commentStatus?.remove();
+    this.commentStatus = null;
     // Views closed during the session were cleaned by their own `view.register`.
     // Any still-open markdown view's observer must be disconnected here — walk the
     // live leaves rather than a retained list, so we never hold a closed view.
@@ -611,11 +616,24 @@ export default class ReviewMdPlugin extends Plugin {
 
   // ---- Comment mode: click-to-comment authoring (req 2) ----
 
-  /** Arm/disarm comment mode: toggles the body class (cursor + affordances). */
+  /** Arm/disarm comment mode: toggles the body class (crosshair cursor + click
+   *  affordances) and shows a persistent status-bar indicator while it's on, so the
+   *  reader can tell the plugin owns their clicks. */
   private setCommentMode(on: boolean): void {
     this.commentMode = on;
     document.body.toggleClass("review-md-comment-mode", on);
     this.commentRibbon?.toggleClass("is-active", on);
+    if (on) {
+      if (!this.commentStatus) {
+        this.commentStatus = this.addStatusBarItem();
+        this.commentStatus.addClass("review-md-status");
+        this.commentStatus.setText("✍️ review-md: comment mode");
+        this.commentStatus.setAttribute("aria-label", "Comment mode is on — click the document to comment");
+      }
+    } else {
+      this.commentStatus?.remove();
+      this.commentStatus = null;
+    }
     new Notice(`review-md: comment mode ${on ? "on — click to comment" : "off"}`);
   }
 
@@ -696,22 +714,23 @@ export default class ReviewMdPlugin extends Plugin {
       target,
       editor ? { editor, x: evt.clientX, y: evt.clientY } : undefined,
     );
-    // Clear the selection so the highlight flash reads cleanly afterwards.
+    // Clear the selection so the anchor preview reads cleanly afterwards.
     window.getSelection()?.removeAllRanges();
 
-    // A previous click that never got a first comment left an empty thread —
-    // clicking again abandons it, so sweep empties before minting the new one.
-    await this.pruneEmptyThreads(file);
+    // Don't mint a thread on the raw click any more (that littered the sidecar with
+    // empty threads on every mis-click). Instead open the sidebar and hand the
+    // anchor to a draft composer — the thread is written only if the user commits a
+    // comment, and Cancel discards it with no sidecar write.
+    // See docs/issues/comment-draft-composer.md.
+    await this.activateCommentsView();
+    this.openDraftComposer(file, anchor);
+    new Notice(`review-md: draft comment on ${describeAnchorShort(anchor)} — write a comment or cancel`);
+  }
 
-    try {
-      const id = await this.createThread(file, anchor);
-      await this.activateCommentsView();
-      // Let the sidebar re-render from the new frontmatter, then focus the card.
-      window.setTimeout(() => this.focusThreadInSidebar(id), 120);
-      new Notice(`review-md: new thread ${id} (${describeAnchorShort(anchor)})`);
-    } catch (err) {
-      new Notice(`review-md: ${String(err)}`);
-    }
+  /** Hand a resolved click anchor to the comments sidebar's draft composer. */
+  private openDraftComposer(file: TFile, anchor: Record<string, unknown>): void {
+    const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_COMMENTS)[0]?.view;
+    if (view instanceof CommentsView) view.beginDraft(file, anchor);
   }
 
   /** Decide what a click anchors to: mermaid node, edge, image, or text/selection.
@@ -926,8 +945,15 @@ export default class ReviewMdPlugin extends Plugin {
       .forEach((v) => v.previewMode?.rerender(true));
   }
 
-  /** Push a new, message-less thread onto the file's sidecar; return its id. */
-  async createThread(file: TFile, anchor: Record<string, unknown>): Promise<string> {
+  /** Push a new thread onto the file's sidecar and return its id. When
+   *  `firstMessage` is given it's written as the thread's first comment in the same
+   *  sidecar write (the draft composer's "Comment" path), so no message-less thread
+   *  is ever committed; without it the thread starts empty (legacy callers). */
+  async createThread(
+    file: TFile,
+    anchor: Record<string, unknown>,
+    firstMessage?: { author: string; body: string },
+  ): Promise<string> {
     const id = mkId();
     // Stamp the reviewed version before writing. bodyHash strips block-id markers
     // (see bodyHashFor), so the `^blockId` we may add below never counts as a
@@ -948,8 +974,11 @@ export default class ReviewMdPlugin extends Plugin {
     // never flips this thread's git stamp to WORKING_REV.
     const anchorHash = await this.anchorHashFor(file, anchor);
     if (anchorHash) rev.anchorHash = anchorHash;
+    const messages = firstMessage
+      ? [{ author: firstMessage.author, ts: new Date().toISOString(), body: firstMessage.body }]
+      : [];
     await this.mutateReview(file, (data) => {
-      data.threads.push({ id, anchor, resolved: false, messages: [], rev });
+      data.threads.push({ id, anchor, resolved: false, messages, rev });
     });
     return id;
   }

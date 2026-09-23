@@ -33,7 +33,9 @@ import {
   middleEllipsis,
   mermaidBlocksFrom,
   effectiveReviewer,
+  diffThreads,
 } from "../src/pure.ts";
+import type { ThreadLike } from "../src/pure.ts";
 
 test("stripFrontmatter removes a normal YAML block, keeps the body", () => {
   const text = "---\ntitle: Hi\ntags: [a, b]\n---\n# Body\n\nprose\n";
@@ -213,4 +215,93 @@ test("effectiveReviewer trims a set name and falls back to 'reviewer' when blank
   // Blank / whitespace-only → the generic default, never a specific person's name.
   assert.equal(effectiveReviewer(""), "reviewer");
   assert.equal(effectiveReviewer("   "), "reviewer");
+});
+
+// ---- Comments panel: surgical-update diff ----
+
+/** A small thread factory so each diff test states only what it varies. */
+function thread(id: string, over: Partial<ThreadLike> = {}): ThreadLike {
+  return {
+    id,
+    resolved: false,
+    anchor: { type: "text", quote: `quote ${id}` },
+    messages: [{ author: "omar", ts: "2026-09-19T10:00:00Z", body: `first ${id}` }],
+    rev: { bodyHash: "abc", git: { commit: "1234567" } },
+    ...over,
+  };
+}
+
+test("diffThreads: identical lists produce an empty diff (the no-op write path)", () => {
+  // Every write triggers two refreshes (the caller's and notifyReviewChanged's);
+  // the second must find nothing to do, or it would churn DOM for no reason.
+  const a = [thread("t1"), thread("t2")];
+  const b = [thread("t1"), thread("t2")];
+  assert.deepEqual(diffThreads(a, b), { added: [], removed: [], changed: [] });
+});
+
+test("diffThreads names added and removed ids, in list order", () => {
+  const prev = [thread("t1"), thread("t2"), thread("t3")];
+  const next = [thread("t3"), thread("t4"), thread("t5")];
+  const d = diffThreads(prev, next);
+  assert.deepEqual(d.added, ["t4", "t5"]);
+  assert.deepEqual(d.removed, ["t1", "t2"]);
+  assert.deepEqual(d.changed, []);
+});
+
+test("diffThreads attributes a reply to `messages` only", () => {
+  const before = thread("t1");
+  const after = thread("t1", {
+    messages: [...before.messages, { author: "claude", ts: "2026-09-19T10:05:00Z", body: "reply" }],
+  });
+  assert.deepEqual(diffThreads([before], [after]).changed, [{ id: "t1", fields: ["messages"] }]);
+});
+
+test("diffThreads sees an in-place body edit and a delete as `messages` changes", () => {
+  const before = thread("t1", {
+    messages: [
+      { author: "omar", ts: "1", body: "a" },
+      { author: "omar", ts: "2", body: "b" },
+    ],
+  });
+  const edited = thread("t1", {
+    messages: [
+      { author: "omar", ts: "1", body: "a (edited)" },
+      { author: "omar", ts: "2", body: "b" },
+    ],
+  });
+  const deleted = thread("t1", { messages: [{ author: "omar", ts: "2", body: "b" }] });
+  assert.deepEqual(diffThreads([before], [edited]).changed, [{ id: "t1", fields: ["messages"] }]);
+  assert.deepEqual(diffThreads([before], [deleted]).changed, [{ id: "t1", fields: ["messages"] }]);
+});
+
+test("diffThreads attributes a resolve toggle to `resolved` and a re-anchor to `anchor`/`rev`", () => {
+  const base = thread("t1");
+  const resolved = thread("t1", { resolved: true });
+  assert.deepEqual(diffThreads([base], [resolved]).changed, [{ id: "t1", fields: ["resolved"] }]);
+  // The post-commit re-anchor hook rewrites rev.git.commit (working → sha) and
+  // may add a blockId to the anchor: both are "rebuild the card" changes.
+  const reanchored = thread("t1", {
+    anchor: { type: "text", quote: "quote t1", blockId: "cmt-1" },
+    rev: { bodyHash: "abc", git: { commit: "89abcde" } },
+  });
+  assert.deepEqual(diffThreads([base], [reanchored]).changed, [{ id: "t1", fields: ["anchor", "rev"] }]);
+});
+
+test("diffThreads reports several fields on one thread together, other threads untouched", () => {
+  const prev = [thread("t1"), thread("t2")];
+  const next = [
+    thread("t1", { resolved: true, messages: [...thread("t1").messages, { author: "x", ts: "3", body: "y" }] }),
+    thread("t2"),
+  ];
+  const d = diffThreads(prev, next);
+  assert.deepEqual(d.changed, [{ id: "t1", fields: ["resolved", "messages"] }]);
+  assert.deepEqual(d.added, []);
+  assert.deepEqual(d.removed, []);
+});
+
+test("diffThreads treats a missing rev and an absent rev as equal", () => {
+  const a = thread("t1", { rev: undefined });
+  const b = thread("t1");
+  delete (b as { rev?: unknown }).rev;
+  assert.deepEqual(diffThreads([a], [b]), { added: [], removed: [], changed: [] });
 });

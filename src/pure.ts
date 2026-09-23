@@ -181,3 +181,64 @@ export function middleEllipsis(s: string, max = 180): string {
   const tail = Math.floor((max - 3) * 0.4);
   return `${s.slice(0, head).trimEnd()} … ${s.slice(s.length - tail).trimStart()}`;
 }
+
+// ---- Comments panel: the surgical-update diff ----
+
+/** The slice of a thread the comments panel paints from. Structurally matches
+ *  `ReviewThread` in main.ts (kept separate so this layer stays Obsidian-free). */
+export interface ThreadLike {
+  id: string;
+  resolved: boolean;
+  anchor: Record<string, unknown>;
+  messages: { author: string; ts: string; body: string }[];
+  rev?: unknown;
+}
+
+/** The parts of a thread that map to separate regions of its card, so a change
+ *  can be repainted where it landed and nowhere else. */
+export type ThreadField = "resolved" | "messages" | "anchor" | "rev";
+
+export interface ThreadDiff {
+  /** Ids in `next` but not `prev` — need a new card. */
+  added: string[];
+  /** Ids in `prev` but not `next` — card to remove. */
+  removed: string[];
+  /** Ids in both whose content differs, with the fields that moved. */
+  changed: { id: string; fields: ThreadField[] }[];
+}
+
+/** One-line identity of a thread's message list: author + ts + body per message. */
+function messagesKey(t: ThreadLike): string {
+  return t.messages.map((m) => `${m.author}\u0000${m.ts}\u0000${m.body}`).join("\u0001");
+}
+
+/**
+ * Compare what the panel currently shows against a freshly-read thread list and
+ * name exactly what moved. This is the whole basis of the panel's surgical
+ * updates (docs/issues/panel-surgical-updates.md): after a write only the cards
+ * named here are touched, so an in-progress reply on another card, its scroll
+ * position, focus and open previews survive. Field changes are attributed
+ * per region — `messages` (a reply/edit/delete), `resolved` (toggle), `anchor`
+ * (re-anchor hook) and `rev` (re-stamp) — so the caller can repaint the messages
+ * list without rebuilding the card. Order within the lists follows `prev`/`next`.
+ */
+export function diffThreads(prev: ThreadLike[], next: ThreadLike[]): ThreadDiff {
+  const before = new Map(prev.map((t) => [t.id, t]));
+  const after = new Map(next.map((t) => [t.id, t]));
+  const out: ThreadDiff = { added: [], removed: [], changed: [] };
+  for (const t of prev) if (!after.has(t.id)) out.removed.push(t.id);
+  for (const t of next) {
+    const old = before.get(t.id);
+    if (!old) {
+      out.added.push(t.id);
+      continue;
+    }
+    const fields: ThreadField[] = [];
+    if (old.resolved !== t.resolved) fields.push("resolved");
+    if (messagesKey(old) !== messagesKey(t)) fields.push("messages");
+    if (JSON.stringify(old.anchor) !== JSON.stringify(t.anchor)) fields.push("anchor");
+    if (JSON.stringify(old.rev ?? null) !== JSON.stringify(t.rev ?? null)) fields.push("rev");
+    if (fields.length) out.changed.push({ id: t.id, fields });
+  }
+  return out;
+}

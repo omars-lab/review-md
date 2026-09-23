@@ -162,6 +162,12 @@ body.theme-dark {
 .review-md-thread.is-filtered-out {
   display: none;
 }
+/* Toggled (not rebuilt) parts of the panel: the "no threads yet" note and a
+   card's resolved pill are hidden via the attribute so a surgical update can
+   flip them without touching neighbours. */
+.review-md-comments [hidden] {
+  display: none;
+}
 
 .review-md-thread {
   border: 1px solid var(--background-modifier-border);

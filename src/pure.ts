@@ -212,6 +212,18 @@ function messagesKey(t: ThreadLike): string {
   return t.messages.map((m) => `${m.author}\u0000${m.ts}\u0000${m.body}`).join("\u0001");
 }
 
+/** Short content-type label for a card's type badge (and the search haystack). */
+export function anchorTypeLabel(anchor: Record<string, unknown>): string {
+  switch (String(anchor?.type ?? "unknown")) {
+    case "mermaidNode":
+      return "node";
+    case "mermaidEdge":
+      return "edge";
+    default:
+      return String(anchor?.type ?? "unknown"); // text / image / header / link pass through
+  }
+}
+
 /**
  * Compare what the panel currently shows against a freshly-read thread list and
  * name exactly what moved. This is the whole basis of the panel's surgical
@@ -241,4 +253,204 @@ export function diffThreads(prev: ThreadLike[], next: ThreadLike[]): ThreadDiff 
     if (fields.length) out.changed.push({ id: t.id, fields });
   }
   return out;
+}
+
+// ---- Comments panel: search / sort / doc position / fold ----
+
+/** Everything the header search box matches against, lower-cased: the thread
+ *  id, the anchor's type label and every string it carries (quote, href, src,
+ *  node, edge endpoints…), and each message's author and body. */
+export function threadSearchText(t: ThreadLike): string {
+  const parts: string[] = [t.id, anchorTypeLabel(t.anchor)];
+  for (const v of Object.values(t.anchor ?? {})) if (typeof v === "string") parts.push(v);
+  for (const m of t.messages) parts.push(m.author, m.body);
+  return parts.join("\n").toLowerCase();
+}
+
+/** Case-insensitive substring match of the search box against a thread; an
+ *  empty (or whitespace) query matches everything. */
+export function threadMatches(t: ThreadLike, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return !q || threadSearchText(t).includes(q);
+}
+
+export type ThreadSort = "recency" | "position" | "author";
+/** The sort menu's items, in menu order. */
+export const THREAD_SORTS: { key: ThreadSort; label: string }[] = [
+  { key: "recency", label: "Recency" },
+  { key: "position", label: "Doc position" },
+  { key: "author", label: "Author" },
+];
+
+/** When the thread last moved: its newest message's timestamp (ms), falling back
+ *  to the authoring stamp `rev.ts`, else 0. */
+export function latestTs(t: ThreadLike): number {
+  let max = 0;
+  for (const m of t.messages) {
+    const n = Date.parse(m.ts);
+    if (!Number.isNaN(n) && n > max) max = n;
+  }
+  if (max === 0) {
+    const ts = (t.rev as { ts?: unknown } | undefined)?.ts;
+    const n = typeof ts === "string" ? Date.parse(ts) : NaN;
+    if (!Number.isNaN(n)) max = n;
+  }
+  return max;
+}
+
+/**
+ * The panel's display order. Open threads always lead and resolved ones trail
+ * (today's behaviour, kept in every mode); within each group the chosen sort
+ * applies — newest activity first, document position (via `positions`, see
+ * anchorLineIn; unknown positions sort last), or first author A→Z — and ties
+ * fall back to recency, then to the sidecar's own (creation) order, which a
+ * stable sort keeps.
+ */
+export function compareThreads(
+  a: ThreadLike,
+  b: ThreadLike,
+  sort: ThreadSort,
+  positions?: Map<string, number>,
+): number {
+  const grp = Number(a.resolved) - Number(b.resolved);
+  if (grp) return grp;
+  if (sort === "position") {
+    const pa = positions?.get(a.id) ?? Infinity;
+    const pb = positions?.get(b.id) ?? Infinity;
+    if (pa !== pb) return pa - pb;
+  } else if (sort === "author") {
+    const c = (a.messages[0]?.author ?? "").localeCompare(b.messages[0]?.author ?? "", undefined, {
+      sensitivity: "base",
+    });
+    if (c) return c;
+  }
+  return latestTs(b) - latestTs(a);
+}
+
+export function sortThreads<T extends ThreadLike>(threads: T[], sort: ThreadSort, positions?: Map<string, number>): T[] {
+  return [...threads].sort((a, b) => compareThreads(a, b, sort, positions));
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Where a thread's anchor sits in `body`, as a 0-based line — the "doc position"
+ * sort key, read fresh from the current text so it tracks edits. Per anchor type
+ * the best signal available:
+ *   - text / header: the line carrying the anchor's `^blockId` (durable across
+ *     edits) — else the first line containing the quote — else `anchor.line` as
+ *     recorded at click time.
+ *   - mermaidNode: the first line inside a ```mermaid fence that names the node
+ *     id, so nodes sort in declaration order within a diagram and diagrams in
+ *     document order.
+ *   - mermaidEdge: the line of the `from … --> … to` link; else the first line
+ *     naming `from` in a fence that also names `to`.
+ *   - image: the first line mentioning the src (or its file name — the DOM src is
+ *     an app:// URL, the source holds the vault path).
+ *   - link: the first line mentioning the href, else the link text.
+ * `null` when nothing matches (the thread sorts last).
+ */
+export function anchorLineIn(body: string, anchor: Record<string, unknown>): number | null {
+  const a = anchor as {
+    type?: string;
+    blockId?: string;
+    quote?: string;
+    line?: number;
+    node?: string;
+    from?: string;
+    to?: string;
+    src?: string;
+    href?: string;
+  };
+  const lines = body.split(/\r?\n/);
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  const first = (pred: (l: string) => boolean, from = 0, to = lines.length): number | null => {
+    for (let i = from; i < to; i++) if (pred(lines[i])) return i;
+    return null;
+  };
+  const names = (id: string) => {
+    const re = new RegExp(`(^|[^\\w])${escapeRe(id)}([^\\w]|$)`);
+    return (l: string) => re.test(l);
+  };
+  // Inner line ranges [start, end) of every ```mermaid fence, in document order.
+  const fences: [number, number][] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^[ \t]*`{3,}\s*mermaid\s*$/.test(lines[i])) continue;
+    let j = i + 1;
+    while (j < lines.length && !/^[ \t]*`{3,}\s*$/.test(lines[j])) j++;
+    fences.push([i + 1, j]);
+    i = j;
+  }
+  const byQuote = (): number | null => {
+    const q = a.quote ? norm(a.quote).slice(0, 60) : "";
+    return q ? first((l) => norm(l).includes(q)) : null;
+  };
+
+  switch (a.type) {
+    case "mermaidNode": {
+      if (!a.node) return null;
+      const has = names(a.node);
+      for (const [s, e] of fences) {
+        const at = first(has, s, e);
+        if (at !== null) return at;
+      }
+      return null;
+    }
+    case "mermaidEdge": {
+      if (!a.from || !a.to) return null;
+      const link = new RegExp(
+        `(^|[^\\w])${escapeRe(a.from)}\\b.*?(?:--+>?|==+>?|-\\.-*>?|~~+).*?\\b${escapeRe(a.to)}([^\\w]|$)`,
+      );
+      for (const [s, e] of fences) {
+        const at = first((l) => link.test(l), s, e);
+        if (at !== null) return at;
+      }
+      const hasFrom = names(a.from);
+      const hasTo = names(a.to);
+      for (const [s, e] of fences) {
+        if (first(hasTo, s, e) === null) continue;
+        const at = first(hasFrom, s, e);
+        if (at !== null) return at;
+      }
+      return null;
+    }
+    case "text":
+    case "header": {
+      if (a.blockId) {
+        const idRe = new RegExp(`(^|\\s)\\^${escapeRe(a.blockId)}[ \\t]*$`);
+        const at = first((l) => idRe.test(l));
+        if (at !== null) return at;
+      }
+      const at = byQuote();
+      if (at !== null) return at;
+      return typeof a.line === "number" && Number.isFinite(a.line) ? a.line : null;
+    }
+    case "image": {
+      const src = a.src?.trim() ?? "";
+      if (!src) return null;
+      const at = first((l) => l.includes(src));
+      if (at !== null) return at;
+      const base = src.split("/").pop()?.split("?")[0] ?? "";
+      return base ? first((l) => l.includes(base)) : null;
+    }
+    case "link": {
+      const href = a.href?.trim() ?? "";
+      const at = href ? first((l) => l.includes(href)) : null;
+      return at ?? byQuote();
+    }
+    default:
+      return byQuote();
+  }
+}
+
+/** Threads with more than this many messages start folded to their last one. */
+export const FOLD_OVER = 3;
+
+/** Whether a card starts folded when first built: resolved threads (settled,
+ *  read rarely) and long ones. The user's own fold/unfold is remembered per
+ *  thread id afterwards, so this only ever seeds the state. */
+export function startsFolded(t: ThreadLike): boolean {
+  return t.resolved || t.messages.length > FOLD_OVER;
 }

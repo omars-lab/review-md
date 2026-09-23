@@ -8,8 +8,14 @@ import {
   snippetAround,
   middleEllipsis,
   diffThreads,
+  anchorTypeLabel,
+  threadMatches,
+  sortThreads,
+  anchorLineIn,
+  startsFolded,
+  THREAD_SORTS,
 } from "../pure";
-import type { ThreadField } from "../pure";
+import type { ThreadField, ThreadSort } from "../pure";
 
 export const VIEW_TYPE_COMMENTS = "review-md-comments";
 
@@ -29,6 +35,9 @@ interface ThreadCard {
   resolvedTag: HTMLElement;
   /** Resolve ⇄ Reopen — relabelled when the flag flips. */
   toggleBtn: HTMLButtonElement;
+  /** The "show N earlier" fold toggle at the head of the messages; null on a
+   *  single-message thread (nothing to fold). */
+  foldBtn: HTMLButtonElement | null;
 }
 
 /** What a warm repaint must hand back untouched: the focused control (with a
@@ -94,6 +103,21 @@ export class CommentsView extends ItemView {
    *  can repaint its label + active state without a full re-render. */
   private revFilterBtn: HTMLButtonElement | null = null;
   private revFilterLabelEl: HTMLElement | null = null;
+  /** The header search box's text — matched against ids, anchors, authors and
+   *  bodies (pure threadMatches); composes with the chips + revision filter. */
+  private searchQuery = "";
+  /** The header sort. Recency by default: a review is read newest-activity
+   *  first; "position" walks the document, "author" groups by who opened it. */
+  private sortMode: ThreadSort = "recency";
+  /** Each thread's anchor line in the current body (pure anchorLineIn) — the
+   *  "position" sort key, refreshed from the file on every paint. */
+  private positions = new Map<string, number>();
+  /** Fold state by thread id: `true` = only the last message shows. Seeded from
+   *  startsFolded when a card is first built, then owned by the user's clicks;
+   *  kept across surgical updates and card rebuilds, reset on a file switch. */
+  private folded = new Map<string, boolean>();
+  /** Header controls whose label reflects state (sort menu button). */
+  private sortLabelEl: HTMLElement | null = null;
   /** The cards on screen, by thread id — the index reconcile() updates in place
    *  after a write instead of rebuilding the panel. */
   private cards = new Map<string, ThreadCard>();
@@ -154,7 +178,10 @@ export class CommentsView extends ItemView {
     // registerEvent handles listener teardown; drop the card index + DOM so no
     // closure keeps a detached card (and its thread data) alive.
     this.cards.clear();
+    this.folded.clear();
+    this.positions.clear();
     this.listEl = this.draftSlot = this.emptyEl = null;
+    this.revFilterBtn = this.revFilterLabelEl = this.sortLabelEl = null;
     this.renderedPath = null;
     this.contentEl.empty();
   }
@@ -174,7 +201,10 @@ export class CommentsView extends ItemView {
     const prev = this.file;
     this.file = next;
     // A revision is meaningful only within its file — reset the filter on switch.
+    // Fold choices and positions are keyed by this file's thread ids too.
     this.revisionFilter = null;
+    this.folded.clear();
+    this.positions.clear();
     if (prev && prev !== next) void this.plugin.pruneEmptyThreads(prev);
     void this.refresh();
   }
@@ -273,6 +303,7 @@ export class CommentsView extends ItemView {
     root.addClass("review-md-comments");
     this.cards.clear();
     this.listEl = this.draftSlot = this.emptyEl = null;
+    this.sortLabelEl = null;
     this.renderedPath = this.file?.path ?? null;
 
     if (!this.file) {
@@ -322,6 +353,39 @@ export class CommentsView extends ItemView {
       };
     }
 
+    // Tools row — a search box (substring over ids, anchors, authors, bodies;
+    // narrows whatever the chips + revision filter leave) and the sort menu. Both
+    // are painted from view state, so a cold rebuild keeps what was typed/chosen;
+    // a warm reconcile never touches the header at all.
+    const tools = header.createDiv({ cls: "review-md-tools" });
+    const search = tools.createEl("input", {
+      cls: "review-md-search",
+      attr: { type: "search", placeholder: "Search comments…", "aria-label": "Search comments" },
+    });
+    search.value = this.searchQuery;
+    search.oninput = () => {
+      this.searchQuery = search.value;
+      this.applyFilter();
+    };
+    search.onkeydown = (e) => {
+      if (e.key === "Escape" && search.value) {
+        // First Escape clears a query; a second (on an empty box) blurs, as usual.
+        e.preventDefault();
+        search.value = "";
+        this.searchQuery = "";
+        this.applyFilter();
+      }
+    };
+    const sortBtn = tools.createEl("button", {
+      cls: "review-md-sort",
+      attr: { "aria-label": "Sort threads", "aria-haspopup": "menu" },
+    });
+    setIcon(sortBtn.createSpan({ cls: "review-md-sort-icon" }), "arrow-up-down");
+    this.sortLabelEl = sortBtn.createSpan({ cls: "review-md-sort-label" });
+    setIcon(sortBtn.createSpan({ cls: "review-md-rev-filter-caret" }), "chevron-down");
+    sortBtn.onclick = (e) => this.showSortMenu(e);
+    this.updateSortLabel();
+
     // A pending draft (from a click in comment mode) leads the panel — its own card
     // with the anchor preview and a focused composer, above any existing threads.
     this.draftSlot = root.createDiv({ cls: "review-md-draft-slot" });
@@ -342,6 +406,7 @@ export class CommentsView extends ItemView {
     // Paint chips + card visibility now (outdated set may still be empty; the
     // async body-hash pass re-runs this with the drift known).
     this.applyFilter();
+    void this.refreshPositions(this.file);
   }
 
   /**
@@ -396,6 +461,7 @@ export class CommentsView extends ItemView {
     // recompute async and repaint only the rows/chips they own.
     void this.refreshRevisions();
     void this.computeStaleness(file);
+    void this.refreshPositions(file);
     this.applyFilter();
   }
 
@@ -408,9 +474,59 @@ export class CommentsView extends ItemView {
   }
 
   /** The display order of the current threads: open ones first, then resolved,
-   *  each group in sidecar (creation) order. */
+   *  each group by the header sort (pure compareThreads). */
   private orderedThreads(): ReviewThread[] {
-    return [...this.threads].sort((a, b) => Number(a.resolved) - Number(b.resolved));
+    return sortThreads(this.threads, this.sortMode, this.positions);
+  }
+
+  /** Re-read where each thread's anchor sits in the document (the "position"
+   *  sort key) and reorder if that moved anything. Runs on every paint, since a
+   *  body edit or a new thread can shift lines; cheap (cachedRead + a line scan). */
+  private async refreshPositions(file: TFile): Promise<void> {
+    const threads = this.threads;
+    const body = await this.app.vault.cachedRead(file);
+    if (this.file !== file) return; // switched files while we awaited
+    const next = new Map<string, number>();
+    for (const t of threads) {
+      const line = anchorLineIn(body, t.anchor);
+      if (line !== null) next.set(t.id, line);
+    }
+    const same = next.size === this.positions.size && [...next].every(([id, l]) => this.positions.get(id) === l);
+    this.positions = next;
+    if (!same && this.sortMode === "position") this.reorder();
+  }
+
+  /** Reorder the cards for a new sort/positions, keeping focus + scroll put. */
+  private reorder(): void {
+    const keep = this.captureTransient();
+    this.applyOrder();
+    this.restoreTransient(keep);
+  }
+
+  /** Open the sort menu: one checkable item per mode. */
+  private showSortMenu(e: MouseEvent): void {
+    const menu = new Menu();
+    for (const s of THREAD_SORTS) {
+      menu.addItem((i) =>
+        i
+          .setTitle(s.label)
+          .setChecked(this.sortMode === s.key)
+          .onClick(() => this.setSort(s.key)),
+      );
+    }
+    menu.showAtMouseEvent(e);
+  }
+
+  private setSort(mode: ThreadSort): void {
+    this.sortMode = mode;
+    this.updateSortLabel();
+    this.reorder();
+  }
+
+  private updateSortLabel(): void {
+    const label = THREAD_SORTS.find((s) => s.key === this.sortMode)?.label ?? "Sort";
+    this.sortLabelEl?.setText(label);
+    this.sortLabelEl?.parentElement?.setAttribute("aria-label", `Sort threads (${label})`);
   }
 
   /** Move cards into display order with the fewest DOM moves: a card already at
@@ -478,7 +594,8 @@ export class CommentsView extends ItemView {
     this.contentEl.querySelectorAll<HTMLElement>(".review-md-thread").forEach((card) => {
       const t = card.dataset.threadId ? this.threads.find((x) => x.id === card.dataset.threadId) : undefined;
       if (!t) return;
-      const visible = this.activeFilters.has(this.categoryOf(t)) && this.matchesRevision(t);
+      const visible =
+        this.activeFilters.has(this.categoryOf(t)) && this.matchesRevision(t) && threadMatches(t, this.searchQuery);
       card.toggleClass("is-filtered-out", !visible);
     });
   }
@@ -625,7 +742,10 @@ export class CommentsView extends ItemView {
     const del = labeledButton(actions, "trash-2", "", "review-md-delete");
     del.setAttribute("aria-label", "Delete thread");
 
-    const card: ThreadCard = { el, thread, msgsEl, resolvedTag, toggleBtn };
+    const card: ThreadCard = { el, thread, msgsEl, resolvedTag, toggleBtn, foldBtn: null };
+    // First sight of this thread decides its fold (resolved / long → folded);
+    // from then on the user's own toggles are what's remembered.
+    if (!this.folded.has(thread.id)) this.folded.set(thread.id, startsFolded(thread));
 
     // Bidirectional link: activating the card (except over a control) scrolls the
     // reader to the anchored region and flashes a highlight over it.
@@ -695,8 +815,22 @@ export class CommentsView extends ItemView {
     const openText = openBox?.querySelector<HTMLTextAreaElement>("textarea")?.value;
 
     msgsEl.empty();
+    card.foldBtn = null;
     if (thread.messages.length === 0) {
       msgsEl.createDiv({ cls: "review-md-empty-thread", text: "New thread — add the first comment below." });
+    }
+    // Fold toggle: with more than one message, the card can show just the last
+    // one. The button leads the list so "show N earlier" reads where the earlier
+    // messages would be; applyFold() sets its label + aria-expanded.
+    if (thread.messages.length > 1) {
+      const fold = msgsEl.createEl("button", { cls: "review-md-fold" });
+      setIcon(fold.createSpan({ cls: "review-md-fold-icon" }), "chevron-right");
+      fold.createSpan({ cls: "review-md-btn-label" });
+      fold.onclick = () => {
+        this.folded.set(card.thread.id, !this.isFolded(card.thread.id));
+        this.applyFold(card);
+      };
+      card.foldBtn = fold;
     }
     thread.messages.forEach((m, index) => {
       const row = msgsEl.createDiv({ cls: "review-md-message" });
@@ -733,6 +867,27 @@ export class CommentsView extends ItemView {
         this.beginEditMessage(card.thread, index, row, m.body, openText);
       }
     });
+    this.applyFold(card);
+  }
+
+  private isFolded(threadId: string): boolean {
+    return this.folded.get(threadId) === true;
+  }
+
+  /** Show/hide the earlier messages per the fold state and relabel the toggle.
+   *  Rows are toggled in place (no repaint), so an open edit box survives a fold. */
+  private applyFold(card: ThreadCard): void {
+    const rows = card.msgsEl.querySelectorAll<HTMLElement>(":scope > .review-md-message");
+    const earlier = rows.length - 1;
+    const folded = earlier > 0 && this.isFolded(card.thread.id);
+    rows.forEach((row, i) => (row.hidden = folded && i < earlier));
+    card.el.toggleClass("is-folded", folded);
+    const btn = card.foldBtn;
+    if (!btn) return;
+    btn.querySelector(".review-md-btn-label")?.setText(folded ? `Show ${earlier} earlier` : "Hide earlier");
+    btn.setAttribute("aria-expanded", String(!folded));
+    btn.setAttribute("aria-label", folded ? `Show ${earlier} earlier messages` : "Hide earlier messages");
+    btn.toggleClass("is-open", !folded);
   }
 
   /**
@@ -1269,26 +1424,6 @@ function labeledButton(parent: HTMLElement, icon: string, label: string, cls?: s
   setIcon(b, icon);
   if (label) b.createSpan({ cls: "review-md-btn-label", text: label });
   return b;
-}
-
-/** Short content-type label for the card's type badge. */
-function anchorTypeLabel(anchor: Record<string, unknown>): string {
-  switch (String(anchor?.type ?? "unknown")) {
-    case "mermaidNode":
-      return "node";
-    case "mermaidEdge":
-      return "edge";
-    case "text":
-      return "text";
-    case "image":
-      return "image";
-    case "header":
-      return "header";
-    case "link":
-      return "link";
-    default:
-      return String(anchor?.type ?? "unknown");
-  }
 }
 
 /** Human-readable one-liner for a thread's anchor. */

@@ -216,7 +216,13 @@ export class CommentsView extends ItemView {
     const card = this.contentEl.querySelector<HTMLElement>(`[data-thread-id="${threadId}"]`);
     if (!card) return;
     this.setFocused(threadId);
-    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    // The header is sticky and wraps (chips + search + sort), so its height varies;
+    // publish it as a CSS variable the card's scroll-margin-top reads, then align
+    // the card's top just under it. "start" (not "center") so a tall card — a
+    // mermaid preview plus messages — never lands with its head under the header.
+    const header = this.contentEl.querySelector<HTMLElement>(".review-md-header");
+    this.contentEl.style.setProperty("--review-md-header-h", `${header?.offsetHeight ?? 0}px`);
+    card.scrollIntoView({ behavior: "smooth", block: "start" });
     card.addClass("review-md-flash");
     window.setTimeout(() => card.removeClass("review-md-flash"), 1600);
     card.querySelector<HTMLTextAreaElement>(".review-md-reply-input")?.focus();

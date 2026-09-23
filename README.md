@@ -3,7 +3,7 @@
 **Review any Markdown file the way you review code — but on the _rendered_ page.**
 Click any element in a rendered Obsidian doc — a phrase, a heading, an image, even a
 node or edge inside a Mermaid diagram — and drop a comment. Each comment is its own
-chat thread. Threads live in a git-tracked sibling file, never touching the doc you're
+chat thread. Threads live in a git-tracked sibling file, not in the doc you're
 reviewing, and every thread is shareable and repliable through `obsidian://` links.
 
 <p align="center">
@@ -11,8 +11,10 @@ reviewing, and every thread is shareable and repliable through `obsidian://` lin
 </p>
 
 > An Obsidian plugin, built for a **split workflow**: you *edit and commit in the CLI*
-> (e.g. a terminal or a Claude Code session) and *review in Obsidian*. Because comments
-> never land in the reviewed file, commenting never creates a diff on it.
+> (e.g. a terminal or a Claude Code session) and *review in Obsidian*. Comment text never
+> lands in the reviewed file; the only thing a comment can add to it is a native
+> `^block-id` on the anchored block (text anchors only), so the doc's content is never
+> touched.
 
 ---
 

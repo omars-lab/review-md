@@ -224,6 +224,8 @@ body.theme-dark {
   padding: var(--size-4-2);
   margin: var(--size-4-3) 0;
   background: var(--background-secondary);
+  /* Keep a focused card clear of the sticky header (height set by focusThread). */
+  scroll-margin-top: calc(var(--review-md-header-h, 0px) + var(--size-4-3) + var(--size-4-2));
 }
 .review-md-thread.is-resolved {
   opacity: 0.6;

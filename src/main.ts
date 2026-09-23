@@ -1430,6 +1430,22 @@ export default class ReviewMdPlugin extends Plugin {
     if (!ok) throw new Error(`message ${threadId}#${index} not found`);
   }
 
+  /** Remove a single message (by thread id + message index) from the sidecar,
+   *  leaving the thread and its other messages intact. Throws if it isn't found.
+   *  Deleting the sole message is the caller's concern — see the view, which routes
+   *  a last-message delete to deleteThread so no message-less thread is left behind. */
+  async deleteMessage(file: TFile, threadId: string, index: number): Promise<void> {
+    let ok = false;
+    await this.mutateReview(file, (data) => {
+      const t = data.threads.find((x) => x.id === threadId);
+      if (t && t.messages[index]) {
+        t.messages.splice(index, 1);
+        ok = true;
+      }
+    });
+    if (!ok) throw new Error(`message ${threadId}#${index} not found`);
+  }
+
   /** Remove a thread from the file's sidecar entirely. Returns true if one went.
    *  Also strips the thread's source block id when no surviving thread uses it. */
   async deleteThread(file: TFile, threadId: string): Promise<boolean> {

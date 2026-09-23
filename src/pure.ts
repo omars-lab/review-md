@@ -77,6 +77,15 @@ export function blockTextFor(text: string, blockId: string): string | null {
   return removeBlockIdFromText(lines.slice(start, end + 1).join("\n"), blockId).trim();
 }
 
+/**
+ * The author name new sidebar-authored messages (comments + replies) are stamped
+ * with: the trimmed reviewer name, or `"reviewer"` when it's blank. Deliberately
+ * never defaults to a specific person's name — a shipped default must be generic.
+ */
+export function effectiveReviewer(name: string): string {
+  return name.trim() || "reviewer";
+}
+
 /** Short hex sha256 of a string. Uses Web Crypto (`crypto.subtle`), available both
  *  in the Obsidian renderer and in Node ≥20 as a global. */
 export async function sha256Short(text: string, len = 12): Promise<string> {

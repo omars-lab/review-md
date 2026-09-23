@@ -32,6 +32,7 @@ import {
   snippetAround,
   middleEllipsis,
   mermaidBlocksFrom,
+  effectiveReviewer,
 } from "../src/pure.ts";
 
 test("stripFrontmatter removes a normal YAML block, keeps the body", () => {
@@ -204,4 +205,12 @@ test("mermaidBlocksFrom ignores non-mermaid fences and handles CRLF", () => {
 
 test("mermaidBlocksFrom returns [] when there is no mermaid", () => {
   assert.deepEqual(mermaidBlocksFrom("# just prose\n\nno diagrams here"), []);
+});
+
+test("effectiveReviewer trims a set name and falls back to 'reviewer' when blank", () => {
+  assert.equal(effectiveReviewer("Omar"), "Omar");
+  assert.equal(effectiveReviewer("  Omar  "), "Omar");
+  // Blank / whitespace-only → the generic default, never a specific person's name.
+  assert.equal(effectiveReviewer(""), "reviewer");
+  assert.equal(effectiveReviewer("   "), "reviewer");
 });

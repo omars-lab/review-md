@@ -1,5 +1,8 @@
 import {
+  App,
   Plugin,
+  PluginSettingTab,
+  Setting,
   Notice,
   TFile,
   MarkdownView,
@@ -21,6 +24,7 @@ import {
   bodyHash,
   ordinalsFromLog,
   mermaidBlocksFrom,
+  effectiveReviewer,
 } from "./pure";
 
 // Re-export the pure helpers other modules and tests still import from here, so
@@ -60,9 +64,14 @@ interface ReviewMdSettings {
   /** Show the augmented mermaid comment nodes / edge badges in the live render.
    *  Off → diagrams render 100% native (comments still exist in the sidecar). */
   showMermaidComments: boolean;
+  /** The name new comments/replies authored from the sidebar are stamped with.
+   *  Blank → the effective author is the generic `"reviewer"` (never a specific
+   *  person's name — that's not a sensible shipped default). See effectiveAuthor. */
+  reviewerName: string;
 }
 const DEFAULT_SETTINGS: ReviewMdSettings = {
   showMermaidComments: true,
+  reviewerName: "",
 };
 
 /**
@@ -170,6 +179,10 @@ export default class ReviewMdPlugin extends Plugin {
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+
+    // Settings tab: reviewer identity (#6) + the mermaid-overlay toggle, so both
+    // preferences are reachable from Settings, not only a command.
+    this.addSettingTab(new ReviewMdSettingTab(this.app, this));
 
     // One Obsidian action per operation: obsidian://review-md-open?..., review-md-reply?...
     // We can't use a single handler with an `action`/`op` query selector because
@@ -303,11 +316,29 @@ export default class ReviewMdPlugin extends Plugin {
     });
   }
 
-  /** Flip the mermaid-overlay preference, persist it, and re-render open reading
-   *  views so the change takes effect immediately (both directions). */
-  private async toggleMermaidComments(): Promise<void> {
-    this.settings.showMermaidComments = !this.settings.showMermaidComments;
+  /** Persist the current settings object (the one `saveData`/`loadData` path). */
+  async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  /** The author name new sidebar-authored messages are stamped with: the trimmed
+   *  reviewer name, or the generic `"reviewer"` when unset. Single source for both
+   *  the draft composer's first comment and sidebar replies. */
+  effectiveAuthor(): string {
+    return effectiveReviewer(this.settings.reviewerName);
+  }
+
+  /** Flip the mermaid-overlay preference (command-palette entry point). */
+  private async toggleMermaidComments(): Promise<void> {
+    await this.setShowMermaidComments(!this.settings.showMermaidComments);
+  }
+
+  /** Set the mermaid-overlay preference, persist it, and re-render open reading
+   *  views so the change takes effect immediately (both directions). Shared by the
+   *  toggle command and the settings tab. */
+  async setShowMermaidComments(on: boolean): Promise<void> {
+    this.settings.showMermaidComments = on;
+    await this.saveSettings();
     const views = this.app.workspace
       .getLeavesOfType("markdown")
       .map((l) => l.view)
@@ -2033,4 +2064,47 @@ function findBlockContaining(root: HTMLElement, quote: string): HTMLElement | nu
     }
   }
   return best;
+}
+
+/**
+ * The plugin's Settings tab (#6): reviewer identity + the mermaid-overlay toggle.
+ * Both preferences persist through the plugin's `saveData`/`saveSettings` path.
+ */
+class ReviewMdSettingTab extends PluginSettingTab {
+  private plugin: ReviewMdPlugin;
+
+  constructor(app: App, plugin: ReviewMdPlugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    new Setting(containerEl)
+      .setName("Reviewer name")
+      .setDesc('The name new comments and replies are posted under. Leave blank to post as "reviewer".')
+      .addText((text) =>
+        text
+          .setPlaceholder("Your name")
+          .setValue(this.plugin.settings.reviewerName)
+          .onChange(async (value) => {
+            this.plugin.settings.reviewerName = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Show mermaid comment badges")
+      .setDesc(
+        "Overlay comment nodes and edge badges on rendered mermaid diagrams. " +
+          "Off renders diagrams fully native (comments stay in the sidecar).",
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.showMermaidComments)
+          .onChange((value) => void this.plugin.setShowMermaidComments(value)),
+      );
+  }
 }

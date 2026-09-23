@@ -264,8 +264,27 @@ body.theme-dark {
 }
 .review-md-body {
   font-size: var(--font-ui-small);
-  white-space: pre-wrap;
   word-break: break-word;
+}
+/* Bodies are rendered Markdown (MarkdownRenderer wraps blocks in <p>/<ul>/…).
+   Strip the outer block margins so a short comment stays tight, while keeping
+   modest spacing between multiple blocks in a longer one. */
+.review-md-body > :first-child {
+  margin-top: 0;
+}
+.review-md-body > :last-child {
+  margin-bottom: 0;
+}
+.review-md-body p {
+  margin: var(--size-2-2) 0;
+}
+.review-md-body ul,
+.review-md-body ol {
+  margin: var(--size-2-2) 0;
+  padding-inline-start: 1.4em;
+}
+.review-md-body pre {
+  margin: var(--size-4-1) 0;
 }
 
 .review-md-reply {
@@ -303,7 +322,8 @@ body.theme-dark {
   opacity: 0;
   transition: opacity 0.1s ease;
 }
-.review-md-message:hover .review-md-edit.clickable-icon {
+.review-md-message:hover .review-md-edit.clickable-icon,
+.review-md-edit.clickable-icon:focus-visible {
   opacity: 0.7;
 }
 .review-md-edit.clickable-icon:hover {
@@ -312,6 +332,34 @@ body.theme-dark {
 .review-md-edit .svg-icon {
   width: 13px;
   height: 13px;
+}
+
+/* Per-message delete (trash), revealed on hover/focus like the edit pencil;
+   danger tint, and the shared two-step "arm" state widens to show "Delete?". */
+.review-md-msg-del.clickable-icon {
+  padding: 2px;
+  opacity: 0;
+  color: var(--text-muted);
+  transition: opacity 0.1s ease;
+}
+.review-md-message:hover .review-md-msg-del.clickable-icon,
+.review-md-msg-del.clickable-icon:focus-visible,
+.review-md-msg-del.is-armed {
+  opacity: 0.7;
+}
+.review-md-msg-del.clickable-icon:hover {
+  opacity: 1;
+  color: var(--text-error);
+}
+.review-md-msg-del .svg-icon {
+  width: 13px;
+  height: 13px;
+}
+.review-md-msg-del.is-armed {
+  opacity: 1;
+  background-color: var(--background-modifier-error);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-smaller);
 }
 .review-md-edit-box {
   margin: var(--size-4-1) 0;

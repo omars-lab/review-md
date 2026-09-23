@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile, Notice, setIcon, Menu } from "obsidian";
+import { ItemView, WorkspaceLeaf, TFile, Notice, setIcon, Menu, MarkdownRenderer } from "obsidian";
 import type ReviewMdPlugin from "../main";
 import type { ReviewThread } from "../main";
 import {
@@ -198,7 +198,10 @@ export class CommentsView extends ItemView {
 
     const chips = header.createDiv({ cls: "review-md-chips" });
     for (const cat of CATEGORY_ORDER) {
-      const chip = chips.createEl("button", { cls: "review-md-chip", attr: { "data-cat": cat } });
+      const chip = chips.createEl("button", {
+        cls: "review-md-chip",
+        attr: { "data-cat": cat, "aria-label": `Show ${cat} threads`, "aria-pressed": "true" },
+      });
       setIcon(chip.createSpan({ cls: "review-md-chip-icon" }), CATEGORY_ICON[cat]);
       chip.createSpan({ cls: "review-md-chip-label" });
       chip.onclick = () => {
@@ -241,7 +244,9 @@ export class CommentsView extends ItemView {
       if (!cat) return;
       const label = chip.querySelector<HTMLElement>(".review-md-chip-label");
       if (label) label.setText(`${counts[cat]} ${cat}`);
-      chip.toggleClass("is-active", this.activeFilters.has(cat));
+      const active = this.activeFilters.has(cat);
+      chip.toggleClass("is-active", active);
+      chip.setAttribute("aria-pressed", String(active));
       // A zero-count category can't be toggled to anything useful.
       chip.toggleClass("is-empty", counts[cat] === 0);
     });
@@ -335,13 +340,29 @@ export class CommentsView extends ItemView {
     const card = root.createDiv({ cls: "review-md-thread" });
     card.dataset.threadId = thread.id;
     if (thread.resolved) card.addClass("is-resolved");
-    // Bidirectional link: clicking anywhere on the card (except the controls)
-    // scrolls the reader to the anchored region and flashes a highlight over it.
+    // The card doubles as a "locate in the document" button, so make it keyboard-
+    // operable: focusable, announced as a button, and driven by Enter/Space.
+    card.setAttribute("tabindex", "0");
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", `Locate thread ${thread.id} in the document`);
+    // Bidirectional link: activating the card (except over a control) scrolls the
+    // reader to the anchored region and flashes a highlight over it.
+    const locate = () => {
+      this.setFocused(thread.id);
+      if (this.file) this.plugin.highlightAnchor(this.file, thread);
+    };
     card.onclick = (e) => {
       const t = e.target as HTMLElement;
       if (t.closest("button, textarea, a")) return;
-      this.setFocused(thread.id);
-      if (this.file) this.plugin.highlightAnchor(this.file, thread);
+      locate();
+    };
+    card.onkeydown = (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      // Only the card itself, not a focused control inside it (textarea, button,
+      // link), should trigger locate — those handle Enter/Space themselves.
+      if ((e.target as HTMLElement).closest("button, textarea, a, input")) return;
+      e.preventDefault();
+      locate();
     };
     if (thread.id === this.focusedThreadId) card.addClass("is-focused");
 
@@ -400,7 +421,22 @@ export class CommentsView extends ItemView {
         attr: { "aria-label": "Edit comment" },
       });
       setIcon(edit, "pencil");
-      const body = row.createDiv({ cls: "review-md-body", text: m.body });
+      // Per-message delete (trash), revealed on hover/focus like the edit pencil.
+      // On the sole message this is really "delete the thread", so route it there
+      // (and say so) rather than leave a message-less thread behind.
+      const sole = thread.messages.length === 1;
+      const del = meta.createEl("button", {
+        cls: "review-md-msg-del clickable-icon",
+        attr: { "aria-label": sole ? "Delete comment (removes the thread)" : "Delete comment" },
+      });
+      setIcon(del, "trash-2");
+      this.armDeleteButton(del, () =>
+        sole ? void this.deleteThread(thread) : void this.deleteMessage(thread, index),
+      );
+      const body = row.createDiv({ cls: "review-md-body" });
+      // Render the message body as Markdown via Obsidian's sanctioned renderer
+      // (no innerHTML) so code/links/lists/bold display, not raw source.
+      void MarkdownRenderer.render(this.app, m.body, body, this.file?.path ?? "", this);
       const startEdit = () => this.beginEditMessage(thread, index, row, m.body);
       edit.onclick = startEdit;
       body.ondblclick = startEdit; // double-click the text to edit it
@@ -410,7 +446,17 @@ export class CommentsView extends ItemView {
     const replyBox = card.createDiv({ cls: "review-md-reply" });
     const ta = replyBox.createEl("textarea", {
       cls: "review-md-reply-input",
-      attr: { rows: "2", placeholder: "Reply…" },
+      attr: { rows: "2", placeholder: "Reply… (⌘/Ctrl+Enter to post)" },
+    });
+    // Keyboard submit: ⌘Enter (mac) / Ctrl+Enter posts; plain Enter still inserts
+    // a newline. Escape abandons an in-progress reply by blurring the box.
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        void this.sendReply(thread, ta);
+      } else if (e.key === "Escape") {
+        ta.blur();
+      }
     });
     const actions = replyBox.createDiv({ cls: "review-md-actions" });
 
@@ -426,25 +472,36 @@ export class CommentsView extends ItemView {
     // ("Delete?"), second within 3s removes it from the file's frontmatter.
     const del = labeledButton(actions, "trash-2", "", "review-md-delete");
     del.setAttribute("aria-label", "Delete thread");
+    this.armDeleteButton(del, () => void this.deleteThread(thread), "Delete?");
+  }
+
+  /**
+   * Wire a two-step "arm then confirm" onto a trash button, the shared delete
+   * gesture: the first click arms it (danger tint; `confirmLabel`, if given, shown
+   * as a label beside the icon) for 3s, and a second click within that window runs
+   * `onConfirm`. An unconfirmed arm disarms itself after the timeout.
+   */
+  private armDeleteButton(btn: HTMLButtonElement, onConfirm: () => void, confirmLabel?: string): void {
     let armed = false;
     let armTimer = 0;
-    del.onclick = () => {
+    const reset = () => {
+      armed = false;
+      btn.removeClass("is-armed");
+      btn.empty();
+      setIcon(btn, "trash-2");
+    };
+    btn.onclick = () => {
       if (!armed) {
         armed = true;
-        del.addClass("is-armed");
-        del.empty();
-        setIcon(del, "trash-2");
-        del.createSpan({ cls: "review-md-btn-label", text: "Delete?" });
-        armTimer = window.setTimeout(() => {
-          armed = false;
-          del.removeClass("is-armed");
-          del.empty();
-          setIcon(del, "trash-2");
-        }, 3000);
+        btn.addClass("is-armed");
+        btn.empty();
+        setIcon(btn, "trash-2");
+        if (confirmLabel) btn.createSpan({ cls: "review-md-btn-label", text: confirmLabel });
+        armTimer = window.setTimeout(reset, 3000);
         return;
       }
       window.clearTimeout(armTimer);
-      void this.deleteThread(thread);
+      onConfirm();
     };
   }
 
@@ -573,7 +630,13 @@ export class CommentsView extends ItemView {
       attr: { "aria-label": "Newer version" },
     });
     setIcon(newer, "chevron-left");
-    const label = step.createEl("button", { cls: "review-md-verstep-label" });
+    const label = step.createEl("button", {
+      cls: "review-md-verstep-label",
+      attr: {
+        "aria-label": "Toggle a preview of the anchored content at this version",
+        "aria-expanded": "false",
+      },
+    });
     const older = step.createEl("button", {
       cls: "review-md-verstep-btn",
       attr: { "aria-label": "Older version" },
@@ -614,6 +677,7 @@ export class CommentsView extends ItemView {
     label.onclick = () => {
       preview.hidden = !preview.hidden;
       step.toggleClass("is-open", !preview.hidden);
+      label.setAttribute("aria-expanded", String(!preview.hidden));
       if (!preview.hidden) void this.showVersionPreview(thread, preview, versions[idx], ordinals, cache);
     };
     sync();
@@ -710,8 +774,7 @@ export class CommentsView extends ItemView {
     ta.rows = Math.min(8, Math.max(2, current.split("\n").length));
     const editActions = box.createDiv({ cls: "review-md-actions" });
 
-    const save = labeledButton(editActions, "check", "Save", "mod-cta");
-    save.onclick = async () => {
+    const doSave = async () => {
       const next = ta.value.trim();
       if (!next) {
         new Notice("review-md: comment can't be empty");
@@ -724,11 +787,24 @@ export class CommentsView extends ItemView {
         new Notice(`review-md: ${String(err)}`);
       }
     };
-    const cancel = labeledButton(editActions, "x", "Cancel");
-    cancel.onclick = () => {
+    const doCancel = () => {
       box.remove();
       if (body) body.show();
     };
+    const save = labeledButton(editActions, "check", "Save", "mod-cta");
+    save.onclick = () => void doSave();
+    const cancel = labeledButton(editActions, "x", "Cancel");
+    cancel.onclick = doCancel;
+    // Same keyboard submit as the reply box: ⌘/Ctrl+Enter saves, Escape cancels.
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        void doSave();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        doCancel();
+      }
+    });
     ta.focus();
   }
 
@@ -800,6 +876,20 @@ export class CommentsView extends ItemView {
     try {
       const removed = await this.plugin.deleteThread(this.file, thread.id);
       new Notice(removed ? `review-md: deleted thread ${thread.id}` : `review-md: thread ${thread.id} not found`);
+      this.render();
+    } catch (err) {
+      new Notice(`review-md: ${String(err)}`);
+    }
+  }
+
+  /** Remove a single message from a thread (the per-message trash affordance),
+   *  leaving the rest of the thread intact. The sole-message case is routed to
+   *  deleteThread by the caller, so this never empties a thread. */
+  private async deleteMessage(thread: ReviewThread, index: number): Promise<void> {
+    if (!this.file) return;
+    try {
+      await this.plugin.deleteMessage(this.file, thread.id, index);
+      new Notice(`review-md: deleted a comment in ${thread.id}`);
       this.render();
     } catch (err) {
       new Notice(`review-md: ${String(err)}`);

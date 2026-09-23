@@ -30,10 +30,11 @@ reviewing, and every thread is shareable and repliable through `obsidian://` lin
 - 🧭 **Mermaid comment badges** — threads on a diagram render as recoloured nodes and
   `💬`/count/`✓` badges hung off the diagram **without editing its source**; a **Bake**
   command can fold them in on demand.
-- 🕓 **Version-stamped review** — each thread records the version it was made against,
-  is flagged **outdated** only when the content *it* anchors to actually changes, and
-  can recover the exact reviewed text from git.
-- 🗂 **Triage sidebar** — cards carry a type badge and version stamp; header chips
+- 🕓 **Version-stamped review** — each thread records the version it was made against
+  and is flagged **outdated** only when the content *it* anchors to actually changes. An
+  inline **version stepper** walks the anchored element back through every git revision,
+  rendering it — diagram or text — exactly as it was in each version.
+- 🗂 **Triage sidebar** — cards carry a type badge and a version stepper; header chips
   (**open · hidden · resolved**) filter the list.
 - 📝 **Sidecar storage** — threads live in a git-tracked sibling `.<name>.comments.md`
   (YAML source of truth + a GitHub-legible body), so they diff cleanly and any CLI tool
@@ -54,7 +55,7 @@ An `obsidian://review-md-open` link opens the file focused on a thread; a
 
 ### A comment thread
 
-Type badge, version stamp (`on <commit>`), the anchored excerpt, the message history,
+Type badge, the version stepper, the anchored excerpt, the message history,
 and the reply box — one self-contained thread.
 
 <p align="center">
@@ -67,13 +68,16 @@ and the reply box — one self-contained thread.
   <img src="docs/media/mermaid-badges.png" alt="A Mermaid diagram with commented nodes recoloured and count badges" width="640">
 </p>
 
-### Version stamps & triage chips
+### Version stepper & triage chips
 
-A thread stamped `on <commit>` next to one on the **working copy**; the header chips
-count and filter open / hidden / resolved.
+Each card's rev line is an inline stepper — `‹ vN (sha) ›` walks the anchored element
+through the file's git history (left = newer, right = older), rendering it **as it was**
+in each version. Here the `CS` node read *"… frontmatter"* at **v2** but *"… sidecar"*
+now — the very drift the thread was debating. The header chips count and filter open /
+hidden / resolved.
 
 <p align="center">
-  <img src="docs/media/version-stamp.png" alt="Comment panel showing committed and working-copy version stamps" width="360">
+  <img src="docs/media/version-stepper.png" alt="Inline version stepper: a mermaid node shown as it was at v2 (frontmatter) above its current version (sidecar)" width="360">
   &nbsp;&nbsp;
   <img src="docs/media/filter-chips.png" alt="Open, hidden, and resolved filter chips" width="360">
 </p>

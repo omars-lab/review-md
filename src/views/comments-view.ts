@@ -7,9 +7,38 @@ import {
   revLabelFor,
   snippetAround,
   middleEllipsis,
+  diffThreads,
 } from "../pure";
+import type { ThreadField } from "../pure";
 
 export const VIEW_TYPE_COMMENTS = "review-md-comments";
+
+/**
+ * One thread's card in the panel plus the regions a surgical update repaints.
+ * `thread` is the data the card currently reflects — every closure wired in the
+ * card reads it at click time (never a captured copy), so after a reply/resolve
+ * lands via reconcile() the Resolve/Reopen toggle, delete and edit handlers act
+ * on the current state instead of a stale object. See docs/issues/panel-surgical-updates.md.
+ */
+interface ThreadCard {
+  el: HTMLElement;
+  thread: ReviewThread;
+  /** The messages list — repainted alone when only messages changed. */
+  msgsEl: HTMLElement;
+  /** The "resolved" pill in the card header, shown/hidden with the flag. */
+  resolvedTag: HTMLElement;
+  /** Resolve ⇄ Reopen — relabelled when the flag flips. */
+  toggleBtn: HTMLButtonElement;
+}
+
+/** What a warm repaint must hand back untouched: the focused control (with a
+ *  textarea's caret) and the list's scroll offset. */
+interface Transient {
+  active: HTMLElement | null;
+  selStart: number;
+  selEnd: number;
+  scrollTop: number;
+}
 
 /** A thread's display status. `hidden` = its anchored version text has drifted
  *  (outdated), so it may no longer resolve in the doc. Partitioned by priority
@@ -65,6 +94,20 @@ export class CommentsView extends ItemView {
    *  can repaint its label + active state without a full re-render. */
   private revFilterBtn: HTMLButtonElement | null = null;
   private revFilterLabelEl: HTMLElement | null = null;
+  /** The cards on screen, by thread id — the index reconcile() updates in place
+   *  after a write instead of rebuilding the panel. */
+  private cards = new Map<string, ThreadCard>();
+  /** The container the thread cards live in (below the header + draft slot). */
+  private listEl: HTMLElement | null = null;
+  /** Where the draft composer paints — emptied on Comment/Cancel, so a draft
+   *  can come and go without touching the cards. */
+  private draftSlot: HTMLElement | null = null;
+  /** The "no threads yet" note; toggled, never rebuilt. */
+  private emptyEl: HTMLElement | null = null;
+  /** The file path render() last built the header + list for. refresh()
+   *  reconciles while this still matches `file` and rebuilds only when it doesn't
+   *  (file switch, first paint). */
+  private renderedPath: string | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: ReviewMdPlugin) {
     super(leaf);
@@ -95,14 +138,25 @@ export class CommentsView extends ItemView {
   }
 
   /** Reload threads from the file's sidecar, then repaint. Comment writes go to a
-   *  dotfile Obsidian doesn't index, so the plugin calls this after every write. */
+   *  dotfile Obsidian doesn't index, so the plugin calls this after every write.
+   *  A warm panel (same file already painted) is reconciled card by card; only a
+   *  cold one — first paint, file switch — is rebuilt. */
   async refresh(): Promise<void> {
     this.threads = this.file ? await this.plugin.readThreads(this.file) : [];
-    this.render();
+    if (this.file && this.renderedPath === this.file.path && this.listEl?.isConnected) {
+      this.reconcile(this.threads);
+    } else {
+      this.render();
+    }
   }
 
   async onClose(): Promise<void> {
-    // registerEvent handles listener teardown.
+    // registerEvent handles listener teardown; drop the card index + DOM so no
+    // closure keeps a detached card (and its thread data) alive.
+    this.cards.clear();
+    this.listEl = this.draftSlot = this.emptyEl = null;
+    this.renderedPath = null;
+    this.contentEl.empty();
   }
 
   /** Point the view at the active markdown file and re-render if it changed. */
@@ -149,9 +203,33 @@ export class CommentsView extends ItemView {
       this.file = file;
       void this.refresh().then(() => this.focusDraft());
     } else {
-      this.render();
+      this.paintDraft();
       this.focusDraft();
     }
+  }
+
+  /** Paint (or repaint) the draft composer into its slot, leaving the cards
+   *  alone. A cold panel has no slot yet, so it takes the full render instead. */
+  private paintDraft(): void {
+    if (!this.draftSlot?.isConnected) {
+      this.render();
+      return;
+    }
+    this.draftSlot.empty();
+    if (this.draftAnchor) this.renderDraft(this.draftSlot);
+    this.syncEmpty();
+  }
+
+  /** Drop the draft composer (Comment posted, or Cancel). */
+  private clearDraft(): void {
+    this.draftAnchor = null;
+    this.draftSlot?.empty();
+    this.syncEmpty();
+  }
+
+  /** Show the "no threads yet" note only when there's nothing else to look at. */
+  private syncEmpty(): void {
+    if (this.emptyEl) this.emptyEl.hidden = this.threads.length > 0 || this.draftAnchor !== null;
   }
 
   /** Focus the draft composer's textarea (after it's painted). */
@@ -186,11 +264,16 @@ export class CommentsView extends ItemView {
     await this.copyLink(f.thread, kind);
   }
 
-  /** Rebuild the whole panel from the current file's threads. */
+  /** Cold paint: rebuild the whole panel from the current file's threads. Only
+   *  the first paint and a file switch come here — after a write, refresh()
+   *  reconciles the existing cards instead (see reconcile). */
   private render(): void {
     const root = this.contentEl;
     root.empty();
     root.addClass("review-md-comments");
+    this.cards.clear();
+    this.listEl = this.draftSlot = this.emptyEl = null;
+    this.renderedPath = this.file?.path ?? null;
 
     if (!this.file) {
       root.createEl("p", { cls: "review-md-empty", text: "Open a markdown file to see its comments." });
@@ -241,24 +324,131 @@ export class CommentsView extends ItemView {
 
     // A pending draft (from a click in comment mode) leads the panel — its own card
     // with the anchor preview and a focused composer, above any existing threads.
-    if (this.draftAnchor) this.renderDraft(root);
+    this.draftSlot = root.createDiv({ cls: "review-md-draft-slot" });
+    if (this.draftAnchor) this.renderDraft(this.draftSlot);
 
-    if (threads.length === 0) {
-      if (!this.draftAnchor) {
-        root.createEl("p", {
-          cls: "review-md-empty",
-          text: "No comment threads yet — turn on comment mode and click the document.",
-        });
-      }
-      return;
+    this.emptyEl = root.createEl("p", {
+      cls: "review-md-empty",
+      text: "No comment threads yet — turn on comment mode and click the document.",
+    });
+    this.listEl = root.createDiv({ cls: "review-md-list" });
+    for (const thread of threads) {
+      const card = this.buildCard(thread);
+      this.listEl.appendChild(card.el);
+      this.cards.set(thread.id, card);
     }
-
-    // Open threads first, then resolved ones.
-    const ordered = [...threads].sort((a, b) => Number(a.resolved) - Number(b.resolved));
-    for (const thread of ordered) this.renderThread(root, thread);
+    this.applyOrder();
+    this.syncEmpty();
     // Paint chips + card visibility now (outdated set may still be empty; the
     // async body-hash pass re-runs this with the drift known).
     this.applyFilter();
+  }
+
+  /**
+   * Warm repaint: bring the cards on screen in line with a freshly-read thread
+   * list, touching only what changed. The diff is taken against the cards' own
+   * `thread` records (the true DOM state), not a remembered array, so two
+   * overlapping refreshes — the write path's and notifyReviewChanged's — are each
+   * safe and the second is a no-op. Everything not named in the diff is left as
+   * is: an in-progress reply on another card, an armed delete, an open version
+   * preview, a loaded mermaid mini-render, the focused card's ring. The active
+   * element and scroll offset are captured and put back in case reordering a
+   * card moved it in the DOM (a move blurs its descendants).
+   */
+  private reconcile(next: ReviewThread[]): void {
+    const list = this.listEl;
+    const file = this.file;
+    if (!list || !file) return;
+    const shown = [...this.cards.values()].map((c) => c.thread);
+    const diff = diffThreads(shown, next);
+    const byId = new Map(next.map((t) => [t.id, t]));
+    const keep = this.captureTransient();
+
+    for (const id of diff.removed) {
+      this.cards.get(id)?.el.remove();
+      this.cards.delete(id);
+    }
+    for (const { id, fields } of diff.changed) {
+      const card = this.cards.get(id);
+      const thread = byId.get(id);
+      if (!card || !thread) continue;
+      if (fields.includes("anchor") || fields.includes("rev")) {
+        // The anchor preview / version row are built from these — rebuild the card.
+        const fresh = this.buildCard(thread);
+        card.el.replaceWith(fresh.el);
+        this.cards.set(id, fresh);
+      } else {
+        this.updateCard(card, thread, fields);
+      }
+    }
+    for (const id of diff.added) {
+      const thread = byId.get(id);
+      if (!thread) continue;
+      const card = this.buildCard(thread);
+      list.appendChild(card.el);
+      this.cards.set(id, card);
+    }
+
+    this.applyOrder();
+    this.syncEmpty();
+    this.restoreTransient(keep);
+    // A new thread may add a revision; a body edit may flip drift — both
+    // recompute async and repaint only the rows/chips they own.
+    void this.refreshRevisions();
+    void this.computeStaleness(file);
+    this.applyFilter();
+  }
+
+  /** Repaint just the regions of a card that a diff named. */
+  private updateCard(card: ThreadCard, next: ReviewThread, fields: ThreadField[]): void {
+    const prev = card.thread;
+    card.thread = next;
+    if (fields.includes("resolved")) this.syncResolved(card);
+    if (fields.includes("messages")) this.renderMessages(card, prev);
+  }
+
+  /** The display order of the current threads: open ones first, then resolved,
+   *  each group in sidecar (creation) order. */
+  private orderedThreads(): ReviewThread[] {
+    return [...this.threads].sort((a, b) => Number(a.resolved) - Number(b.resolved));
+  }
+
+  /** Move cards into display order with the fewest DOM moves: a card already at
+   *  its slot is left alone, so a card holding focus or a scrolled-to position is
+   *  only moved when it actually changed place. */
+  private applyOrder(): void {
+    const list = this.listEl;
+    if (!list) return;
+    this.orderedThreads().forEach((t, i) => {
+      const el = this.cards.get(t.id)?.el;
+      if (!el) return;
+      const at = list.children[i] ?? null;
+      if (at !== el) list.insertBefore(el, at);
+    });
+  }
+
+  /** Snapshot the focused control (and a textarea's caret) + scroll offset. */
+  private captureTransient(): Transient {
+    const a = document.activeElement;
+    const active = a instanceof HTMLElement && this.contentEl.contains(a) ? a : null;
+    const ta = active instanceof HTMLTextAreaElement ? active : null;
+    return {
+      active,
+      selStart: ta?.selectionStart ?? 0,
+      selEnd: ta?.selectionEnd ?? 0,
+      scrollTop: this.contentEl.scrollTop,
+    };
+  }
+
+  /** Put focus, caret and scroll back where captureTransient found them (the
+   *  control must still be in the DOM — a removed card's box is let go). */
+  private restoreTransient(t: Transient): void {
+    const { active } = t;
+    if (active?.isConnected && document.activeElement !== active) {
+      active.focus({ preventScroll: true });
+      if (active instanceof HTMLTextAreaElement) active.setSelectionRange(t.selStart, t.selEnd);
+    }
+    this.contentEl.scrollTop = t.scrollTop;
   }
 
   /** The display category for a thread: resolved > hidden(drifted) > open. */
@@ -369,38 +559,20 @@ export class CommentsView extends ItemView {
     this.applyFilter();
   }
 
-  /** One thread card: anchor line, messages, controls, reply box. */
-  private renderThread(root: HTMLElement, thread: ReviewThread): void {
-    const card = root.createDiv({ cls: "review-md-thread" });
-    card.dataset.threadId = thread.id;
-    if (thread.resolved) card.addClass("is-resolved");
+  /** Build one thread card (detached — the caller places it): anchor badge,
+   *  version row, anchor preview, messages, reply box + actions. Every handler
+   *  reads `card.thread`, the record reconcile() keeps current. */
+  private buildCard(thread: ReviewThread): ThreadCard {
+    const el = createDiv({ cls: "review-md-thread" });
+    el.dataset.threadId = thread.id;
     // The card doubles as a "locate in the document" button, so make it keyboard-
     // operable: focusable, announced as a button, and driven by Enter/Space.
-    card.setAttribute("tabindex", "0");
-    card.setAttribute("role", "button");
-    card.setAttribute("aria-label", `Locate thread ${thread.id} in the document`);
-    // Bidirectional link: activating the card (except over a control) scrolls the
-    // reader to the anchored region and flashes a highlight over it.
-    const locate = () => {
-      this.setFocused(thread.id);
-      if (this.file) this.plugin.highlightAnchor(this.file, thread);
-    };
-    card.onclick = (e) => {
-      const t = e.target as HTMLElement;
-      if (t.closest("button, textarea, a")) return;
-      locate();
-    };
-    card.onkeydown = (e) => {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      // Only the card itself, not a focused control inside it (textarea, button,
-      // link), should trigger locate — those handle Enter/Space themselves.
-      if ((e.target as HTMLElement).closest("button, textarea, a, input")) return;
-      e.preventDefault();
-      locate();
-    };
-    if (thread.id === this.focusedThreadId) card.addClass("is-focused");
+    el.setAttribute("tabindex", "0");
+    el.setAttribute("role", "button");
+    el.setAttribute("aria-label", `Locate thread ${thread.id} in the document`);
+    if (thread.id === this.focusedThreadId) el.addClass("is-focused");
 
-    const top = card.createDiv({ cls: "review-md-thread-top" });
+    const top = el.createDiv({ cls: "review-md-thread-top" });
     top.createEl("code", { cls: "review-md-tid", text: thread.id });
     // A compact content-type badge (node / edge / text / image / header) rather
     // than a verbose anchor line — the preview right below already shows *which*
@@ -411,7 +583,7 @@ export class CommentsView extends ItemView {
       text: anchorTypeLabel(thread.anchor),
       attr: { "data-type": anchorTypeLabel(thread.anchor), title: describeAnchor(thread.anchor) },
     });
-    if (thread.resolved) top.createEl("span", { cls: "review-md-resolved-tag", text: "resolved" });
+    const resolvedTag = top.createEl("span", { cls: "review-md-resolved-tag", text: "resolved" });
 
     // Share — a top-right icon (moved out of the action row); opens the link-kind
     // menu (share / native / reply). margin-left:auto floats it to the right edge.
@@ -420,33 +592,114 @@ export class CommentsView extends ItemView {
       attr: { "aria-label": "Share this thread" },
     });
     setIcon(share, "share-2");
-    share.onclick = (e) => {
-      this.setFocused(thread.id);
-      this.showCopyMenu(e, thread);
-    };
 
     // Version row — filled by fillVersionRows() once the current body hash is
     // known: always the commit/version this comment was authored on, plus an
     // "outdated" warning when the reviewed body has since changed.
-    card.createDiv({ cls: "review-md-rev" });
+    el.createDiv({ cls: "review-md-rev" });
 
     // Show what the comment is anchored to, inline in the card: a mini render of
     // the diagram node, or a blockquote of the highlighted passage.
     const anchorType = (thread.anchor as { type?: string })?.type;
     if (anchorType === "mermaidNode" || anchorType === "mermaidEdge") {
-      this.renderMermaidPreview(card, thread);
+      this.renderMermaidPreview(el, thread);
     } else if (anchorType === "text") {
-      this.renderTextPreview(card, thread);
+      this.renderTextPreview(el, thread);
     } else if (anchorType === "link") {
-      this.renderLinkPreview(card, thread);
+      this.renderLinkPreview(el, thread);
     }
 
-    const msgs = card.createDiv({ cls: "review-md-messages" });
+    const msgsEl = el.createDiv({ cls: "review-md-messages" });
+
+    // Reply box.
+    const replyBox = el.createDiv({ cls: "review-md-reply" });
+    const ta = replyBox.createEl("textarea", {
+      cls: "review-md-reply-input",
+      attr: { rows: "2", placeholder: "Reply… (⌘/Ctrl+Enter to post)" },
+    });
+    const actions = replyBox.createDiv({ cls: "review-md-actions" });
+    const send = labeledButton(actions, "send", "Post", "mod-cta");
+    const toggleBtn = actions.createEl("button");
+    // Delete — two-step so a stray click can't lose a thread. First click arms
+    // ("Delete?"), second within 3s removes it from the file's frontmatter.
+    const del = labeledButton(actions, "trash-2", "", "review-md-delete");
+    del.setAttribute("aria-label", "Delete thread");
+
+    const card: ThreadCard = { el, thread, msgsEl, resolvedTag, toggleBtn };
+
+    // Bidirectional link: activating the card (except over a control) scrolls the
+    // reader to the anchored region and flashes a highlight over it.
+    const locate = () => {
+      this.setFocused(card.thread.id);
+      if (this.file) this.plugin.highlightAnchor(this.file, card.thread);
+    };
+    el.onclick = (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest("button, textarea, a")) return;
+      locate();
+    };
+    el.onkeydown = (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      // Only the card itself, not a focused control inside it (textarea, button,
+      // link), should trigger locate — those handle Enter/Space themselves.
+      if ((e.target as HTMLElement).closest("button, textarea, a, input")) return;
+      e.preventDefault();
+      locate();
+    };
+    share.onclick = (e) => {
+      this.setFocused(card.thread.id);
+      this.showCopyMenu(e, card.thread);
+    };
+    // Keyboard submit: ⌘Enter (mac) / Ctrl+Enter posts; plain Enter still inserts
+    // a newline. Escape abandons an in-progress reply by blurring the box.
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        void this.sendReply(card.thread, ta);
+      } else if (e.key === "Escape") {
+        ta.blur();
+      }
+    });
+    send.onclick = () => void this.sendReply(card.thread, ta);
+    toggleBtn.onclick = () => void this.toggleResolved(card.thread);
+    this.armDeleteButton(del, () => void this.deleteThread(card.thread), "Delete?");
+
+    this.syncResolved(card);
+    this.renderMessages(card);
+    return card;
+  }
+
+  /** Reflect the resolved flag everywhere the card shows it: the dimmed card
+   *  style, the header pill and the Resolve ⇄ Reopen action. */
+  private syncResolved(card: ThreadCard): void {
+    const { resolved } = card.thread;
+    card.el.toggleClass("is-resolved", resolved);
+    card.resolvedTag.hidden = !resolved;
+    card.toggleBtn.empty();
+    setIcon(card.toggleBtn, resolved ? "rotate-ccw" : "circle-check");
+    card.toggleBtn.createSpan({ cls: "review-md-btn-label", text: resolved ? "Reopen" : "Resolve" });
+  }
+
+  /**
+   * (Re)paint a card's messages from `card.thread`. On a repaint, an edit box the
+   * user has open is carried across when its message is still there unchanged
+   * (`prev` is the thread as painted before), so a reply arriving on this thread
+   * — from the x-callback link, say — doesn't throw away half-typed words.
+   */
+  private renderMessages(card: ThreadCard, prev?: ReviewThread): void {
+    const { thread, msgsEl } = card;
+    // An open edit: which message, and what's in the box right now.
+    const openBox = msgsEl.querySelector<HTMLElement>(".review-md-edit-box");
+    const openRow = openBox?.closest<HTMLElement>(".review-md-message") ?? null;
+    const openIdx = openRow ? Array.from(msgsEl.children).indexOf(openRow) : -1;
+    const openText = openBox?.querySelector<HTMLTextAreaElement>("textarea")?.value;
+
+    msgsEl.empty();
     if (thread.messages.length === 0) {
-      msgs.createDiv({ cls: "review-md-empty-thread", text: "New thread — add the first comment below." });
+      msgsEl.createDiv({ cls: "review-md-empty-thread", text: "New thread — add the first comment below." });
     }
     thread.messages.forEach((m, index) => {
-      const row = msgs.createDiv({ cls: "review-md-message" });
+      const row = msgsEl.createDiv({ cls: "review-md-message" });
       const meta = row.createDiv({ cls: "review-md-meta" });
       meta.createEl("span", { cls: "review-md-author", text: m.author });
       meta.createEl("span", { cls: "review-md-ts", text: formatTs(m.ts) });
@@ -465,48 +718,21 @@ export class CommentsView extends ItemView {
       });
       setIcon(del, "trash-2");
       this.armDeleteButton(del, () =>
-        sole ? void this.deleteThread(thread) : void this.deleteMessage(thread, index),
+        sole ? void this.deleteThread(card.thread) : void this.deleteMessage(card.thread, index),
       );
       const body = row.createDiv({ cls: "review-md-body" });
       // Render the message body as Markdown via Obsidian's sanctioned renderer
       // (no innerHTML) so code/links/lists/bold display, not raw source.
       void MarkdownRenderer.render(this.app, m.body, body, this.file?.path ?? "", this);
-      const startEdit = () => this.beginEditMessage(thread, index, row, m.body);
+      const startEdit = () => this.beginEditMessage(card.thread, index, row, m.body);
       edit.onclick = startEdit;
       body.ondblclick = startEdit; // double-click the text to edit it
-    });
 
-    // Reply box.
-    const replyBox = card.createDiv({ cls: "review-md-reply" });
-    const ta = replyBox.createEl("textarea", {
-      cls: "review-md-reply-input",
-      attr: { rows: "2", placeholder: "Reply… (⌘/Ctrl+Enter to post)" },
-    });
-    // Keyboard submit: ⌘Enter (mac) / Ctrl+Enter posts; plain Enter still inserts
-    // a newline. Escape abandons an in-progress reply by blurring the box.
-    ta.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        void this.sendReply(thread, ta);
-      } else if (e.key === "Escape") {
-        ta.blur();
+      // Re-open the edit that was in progress on this same, unchanged message.
+      if (index === openIdx && openText !== undefined && prev?.messages[index]?.body === m.body) {
+        this.beginEditMessage(card.thread, index, row, m.body, openText);
       }
     });
-    const actions = replyBox.createDiv({ cls: "review-md-actions" });
-
-    const send = labeledButton(actions, "send", "Post", "mod-cta");
-    send.onclick = () => void this.sendReply(thread, ta);
-
-    const toggle = thread.resolved
-      ? labeledButton(actions, "rotate-ccw", "Reopen")
-      : labeledButton(actions, "circle-check", "Resolve");
-    toggle.onclick = () => void this.toggleResolved(thread);
-
-    // Delete — two-step so a stray click can't lose a thread. First click arms
-    // ("Delete?"), second within 3s removes it from the file's frontmatter.
-    const del = labeledButton(actions, "trash-2", "", "review-md-delete");
-    del.setAttribute("aria-label", "Delete thread");
-    this.armDeleteButton(del, () => void this.deleteThread(thread), "Delete?");
   }
 
   /**
@@ -580,21 +806,18 @@ export class CommentsView extends ItemView {
         new Notice("review-md: comment is empty");
         return;
       }
-      // Clear the draft before the write so the refresh it triggers doesn't repaint
-      // a stale composer over the newly-created thread.
-      this.draftAnchor = null;
       try {
         const id = await this.plugin.createThread(file, anchor, { author: this.author, body });
+        // The write's refresh adds the new card beside the composer; drop the
+        // composer only once the thread exists, so a failed write keeps the text.
+        this.clearDraft();
         new Notice(`review-md: new thread ${id}`);
         await this.focusThread(id);
       } catch (err) {
         new Notice(`review-md: ${String(err)}`);
       }
     };
-    const cancel = (): void => {
-      this.draftAnchor = null;
-      this.render();
-    };
+    const cancel = (): void => this.clearDraft();
 
     // Same keyboard pattern as the reply/edit boxes: ⌘/Ctrl+Enter posts, Escape cancels.
     ta.addEventListener("keydown", (e) => {
@@ -694,18 +917,22 @@ export class CommentsView extends ItemView {
     // One git call for the whole batch: the file's version ladder (sha → v-number).
     const ordinals = await this.plugin.fileRevisionOrdinals(file);
     if (this.file !== file) return; // the user switched files while we awaited
-    const byId = new Map(this.threads.map((t) => [t.id, t]));
-    this.contentEl.querySelectorAll<HTMLElement>(".review-md-thread").forEach((card) => {
-      const id = card.dataset.threadId;
-      const slot = card.querySelector<HTMLElement>(".review-md-rev");
-      const thread = id ? byId.get(id) : undefined;
-      if (!slot || !thread) return;
+    for (const card of this.cards.values()) {
+      const { thread } = card;
+      const slot = card.el.querySelector<HTMLElement>(".review-md-rev");
+      if (!slot) continue;
+      // Rebuild only when the row's inputs moved: the same stamp with the same
+      // drift verdict keeps its stepper — and any version preview the user opened.
+      const outdated = this.outdatedIds.has(thread.id);
+      const want = `${revKeyOf(thread.rev) ?? ""}|${outdated}`;
+      if (slot.dataset.filled === want) continue;
+      slot.dataset.filled = want;
       slot.empty();
       slot.removeClass("is-visible");
-      if (!thread.rev?.bodyHash) return; // seeded fixtures with no stamp stay quiet
+      if (!thread.rev?.bodyHash) continue; // seeded fixtures with no stamp stay quiet
       slot.addClass("is-visible");
-      this.renderVersionStepper(thread, slot, ordinals, this.outdatedIds.has(thread.id));
-    });
+      this.renderVersionStepper(thread, slot, ordinals, outdated);
+    }
     // Drift is now known — repaint chip counts + apply the filter.
     this.applyFilter();
   }
@@ -875,12 +1102,15 @@ export class CommentsView extends ItemView {
     holder.createEl("pre", { text: snippetAround(body, quote) });
   }
 
-  /** Swap a message row's body for an editable textarea with Save / Cancel. */
+  /** Swap a message row's body for an editable textarea with Save / Cancel.
+   *  `initial` pre-fills the box with text carried over from a repaint (see
+   *  renderMessages); it defaults to the message's current body. */
   private beginEditMessage(
     thread: ReviewThread,
     index: number,
     row: HTMLElement,
     current: string,
+    initial = current,
   ): void {
     if (!this.file) return;
     if (row.querySelector(".review-md-edit-box")) return; // already editing
@@ -889,8 +1119,8 @@ export class CommentsView extends ItemView {
 
     const box = row.createDiv({ cls: "review-md-edit-box" });
     const ta = box.createEl("textarea", { cls: "review-md-reply-input" });
-    ta.value = current;
-    ta.rows = Math.min(8, Math.max(2, current.split("\n").length));
+    ta.value = initial;
+    ta.rows = Math.min(8, Math.max(2, initial.split("\n").length));
     const editActions = box.createDiv({ cls: "review-md-actions" });
 
     const doSave = async () => {
@@ -901,7 +1131,7 @@ export class CommentsView extends ItemView {
       }
       try {
         await this.plugin.editMessage(this.file!, thread.id, index, next);
-        this.render();
+        await this.refresh();
       } catch (err) {
         new Notice(`review-md: ${String(err)}`);
       }
@@ -938,7 +1168,7 @@ export class CommentsView extends ItemView {
       await this.plugin.appendReply(this.file, thread.id, { author: this.author, body });
       ta.value = "";
       new Notice(`review-md: replied to ${thread.id}`);
-      this.render();
+      await this.refresh();
     } catch (err) {
       new Notice(`review-md: ${String(err)}`);
     }
@@ -987,7 +1217,7 @@ export class CommentsView extends ItemView {
   private async toggleResolved(thread: ReviewThread): Promise<void> {
     if (!this.file) return;
     await this.plugin.setThreadResolved(this.file, thread.id, !thread.resolved);
-    this.render();
+    await this.refresh();
   }
 
   private async deleteThread(thread: ReviewThread): Promise<void> {
@@ -995,7 +1225,7 @@ export class CommentsView extends ItemView {
     try {
       const removed = await this.plugin.deleteThread(this.file, thread.id);
       new Notice(removed ? `review-md: deleted thread ${thread.id}` : `review-md: thread ${thread.id} not found`);
-      this.render();
+      await this.refresh();
     } catch (err) {
       new Notice(`review-md: ${String(err)}`);
     }
@@ -1009,7 +1239,7 @@ export class CommentsView extends ItemView {
     try {
       await this.plugin.deleteMessage(this.file, thread.id, index);
       new Notice(`review-md: deleted a comment in ${thread.id}`);
-      this.render();
+      await this.refresh();
     } catch (err) {
       new Notice(`review-md: ${String(err)}`);
     }

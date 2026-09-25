@@ -74,23 +74,37 @@ against has since changed. `git.commit`/`git.blob` are for identity and retrieva
 only (`git show <commit>:<relpath>`), never staleness. Full rationale:
 [`version-stamping.md`](issues/version-stamping.md).
 
-## Reading it: `scripts/review-threads.mjs`
+## Reading and answering it: the `reviews` CLI
 
-A headless, dependency-light reader (uses only the `yaml` package) that locates
-the sidecar, parses it, and re-derives the bodyHash to flag stale threads —
-byte-for-byte the same computation the plugin stamps (proven by round-trip: a
-thread the plugin stamps reads back `outdated: false`, and flips to `true` after
-the body is edited).
+`scripts/reviews.mjs` (`npm run reviews -- <command>`) reads sidecars straight
+from the clone and re-derives the bodyHash to flag stale threads — the same
+computation the plugin stamps (proven by round-trip: a thread the plugin stamps
+reads back `outdated: false`, and flips to `true` after the body is edited).
+Reading commands never write. `open` and `reply` send the plugin's obsidian://
+URLs, so Obsidian stays the only writer.
 
 ```
-npm run threads -- path/to/design.md              # readable findings digest
-npm run threads -- path/to/design.md --unresolved # only open threads
-npm run threads -- path/to/design.md --json       # structured, each thread + `outdated`
+npm run reviews -- help                                  # the commands; `help <cmd>` for one
+npm run reviews -- stats docs                            # open / resolved / outdated per doc
+npm run reviews -- list docs --open                      # every open thread under a folder
+npm run reviews -- list path/to/design.md --json         # one doc, structured
+npm run reviews -- find "frontmatter" docs               # threads mentioning some words
+npm run reviews -- show path/to/design.md d1a2b3         # one thread in full
+npm run reviews -- reply path/to/design.md d1a2b3 "Done in abc123." --author claude
+npm run reviews -- open path/to/design.md d1a2b3         # jump to it in Obsidian
 ```
 
-`--json` emits `{ uid, file, threads: [ { …thread, outdated } ] }` — the stable
-programmatic surface for the agent. Exit codes: `0` read OK (even with zero
-threads), `2` usage error, `3` no sidecar (no comments yet).
+The Markdown output is the same digest as the plugin's "Copy open threads for
+AI" command and `obsidian://review-md-export`. `--json` on one doc emits
+`{ uid, file, threads: [ { …thread, outdated } ] }`; on a folder,
+`{ root, files: [ { file, uid, threads } ] }` — the stable programmatic surface
+for the agent. `reply`/`open` find the vault as the nearest folder above the doc
+holding `.obsidian/` (or pass `--vault`); `--dry-run` prints the URL instead.
+Exit codes: `0` OK (even with zero threads), `2` usage error, `3` no sidecar or
+no such thread, `4` couldn't hand the URL to Obsidian.
+
+`npm run threads -- <doc | folder> [--unresolved] [--json]` still works; it is
+`reviews list` under its old name.
 
 ## review-setup checklist
 
@@ -100,9 +114,9 @@ threads), `2` usage error, `3` no sidecar (no comments yet).
 - [ ] `obsidian://review-md-open` and `obsidian://review-md-reply` resolve (the
       x-callback actions the reviewer/agent round-trip on).
 - [ ] For each reviewed file that has comments, its sidecar
-      `<dir>/.<name>.comments.md` exists and `npm run threads -- <file> --json`
+      `<dir>/.<name>.comments.md` exists and `npm run reviews -- list <file> --json`
       exits `0` with parseable output.
 - [ ] The sidecar is git-tracked (not `.gitignore`d) so review state ships with
       the repo.
-- [ ] `npm run threads -- <file>` re-derives a bodyHash equal to the plugin's for
+- [ ] `npm run reviews -- list <file>` re-derives a bodyHash equal to the plugin's for
       an unedited file (staleness signal is trustworthy).

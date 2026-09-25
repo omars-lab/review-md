@@ -1,9 +1,9 @@
 {
   "id": "review-md",
   "name": "Review MD",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "Click any part of a rendered markdown doc to drop a comment thread. Threads live in the file's frontmatter and are shareable / repliable via obsidian:// x-callback URLs.",
+  "description": "Click any part of a rendered markdown doc to drop a comment thread. Threads live in a git-tracked sidecar file next to the doc and are shareable / repliable via obsidian:// x-callback URLs.",
   "author": "omars-lab",
   "authorUrl": "https://github.com/omars-lab",
   "isDesktopOnly": true

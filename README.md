@@ -41,7 +41,8 @@ reviewing, and every thread is shareable and repliable through `obsidian://` lin
   inline **version stepper** walks the anchored element back through every git revision,
   rendering it — diagram or text — exactly as it was in each version.
 - 🗂 **Triage sidebar** — cards carry a type badge and a version stepper. The sticky
-  header filters with chips (**open · hidden · resolved**), searches across bodies,
+  header filters with chips (**open · hidden · resolved**) and a **Revisions** dropdown
+  (only threads authored against one version of the doc, or the working copy), searches across bodies,
   authors and anchors, and sorts by **recency**, **doc position** or **author**; long
   threads fold to their latest message (**Show N earlier**). Edits update the one card
   they touch, so the list never jumps under you.

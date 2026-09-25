@@ -3,9 +3,22 @@
 Deferred ideas and traded-off scope. Pulled into the plan when needed. One line per item; expand
 into `docs/pocs/` or `docs/issues/` if/when picked up.
 
+## Next
+
+- **Beta via BRAT, before the official store release** — the store submission waits on
+  a beta round. Merging to `main` is not a release: as of 2026-09-25 there are **no
+  GitHub releases at all**, so the README's BRAT install path doesn't work yet.
+  Steps: (1) `make version V=0.1.0` → `make release-check` → `make release` to cut the
+  first GitHub release (manifest is still `0.0.1`); (2) install it through BRAT in a
+  clean vault to prove the path end-to-end; (3) hand `omars-lab/review-md` to beta
+  testers and collect issues; (4) fix, cut `0.1.x` betas as needed; (5) **only once
+  there's been a good round of beta testers** do we look at the store submission below. Cutting a release is outward-facing — needs Omar's go on the
+  version number. Requested 2026-09-25 ("beta testing before official release").
+
 ## Deferred
 
-- **Publish review-md as an official Obsidian community plugin** — submit to the
+- **Publish review-md as an official Obsidian community plugin** — **gated on the
+  BRAT beta above; do not submit before it.** Submit to the
   in-app plugin directory so users can search "Review MD" and click Install (the
   truly one-click path). Requires: a PR to `obsidianmd/obsidian-releases` adding the
   plugin to `community-plugins.json`, passing Obsidian's automated + human review
@@ -22,8 +35,8 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
   already correct. The last soft item — the badge palette's hard-coded amber
   hex — is now centralised into theme-aware CSS variables (sidebar chips follow
   light/dark; the diagram amber stays fixed-light because the mermaid canvas is
-  light in both themes). No soft items remain. Ready to submit;
-  until it lands, BRAT (`omars-lab/review-md`) is the install path. Requested
+  light in both themes). No soft items remain. Code-ready to submit once the beta
+  closes; until it lands, BRAT (`omars-lab/review-md`) is the install path. Requested
   2026-09-21. ROI: high value (widest reach, best UX), gated only on Obsidian's
   review turnaround (days–weeks).
 

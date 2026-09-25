@@ -454,3 +454,90 @@ export const FOLD_OVER = 3;
 export function startsFolded(t: ThreadLike): boolean {
   return t.resolved || t.messages.length > FOLD_OVER;
 }
+
+// ---- Export: a Markdown digest of threads for AI tools ----
+//
+// One format for every way threads leave the vault: the "Copy threads for AI"
+// command, the `review-md-export` URL, and scripts/review-threads.mjs (which
+// imports this file). An agent reading any of them sees the same shape.
+
+/** One line saying where a thread is anchored, for every anchor type. */
+export function anchorWhere(anchor: Record<string, unknown> = {}): string {
+  const s = (v: unknown, max: number) => String(v ?? "").replace(/\s+/g, " ").slice(0, max);
+  switch (anchor.type) {
+    case "mermaidNode":
+      return `diagram node ${s(anchor.node, 80)}`;
+    case "mermaidEdge":
+      return `diagram edge ${s(anchor.from, 80)} → ${s(anchor.to, 80)}`;
+    case "image":
+      return `image ${s(anchor.src, 120)}`;
+    case "link":
+      return `link ${anchor.quote ? `“${s(anchor.quote, 60)}” ` : ""}→ ${s(anchor.href, 120)}`;
+    default:
+      return anchor.quote ? `“${s(anchor.quote, 100)}”` : String(anchor.type ?? "text");
+  }
+}
+
+export interface ExportFilter {
+  /** Keep resolved threads too (default: open only). */
+  includeResolved?: boolean;
+  /** Keep only threads matching this text — same match as the panel's search box. */
+  text?: string;
+}
+
+/** The threads an export keeps: open ones (unless `includeResolved`) matching `text`. */
+export function filterThreads<T extends ThreadLike>(threads: T[], filter: ExportFilter = {}): T[] {
+  return threads.filter((t) => (filter.includeResolved || !t.resolved) && threadMatches(t, filter.text ?? ""));
+}
+
+export interface DigestFile {
+  /** Path of the reviewed doc (vault-relative in the plugin, as given in the script). */
+  path: string;
+  threads: (ThreadLike & { outdated?: boolean })[];
+}
+
+/**
+ * Render threads as a Markdown digest an AI tool can act on: per file, each
+ * thread's anchor, state, the version it was written against and every message.
+ * With `vault`, each thread also carries its open link and a reply-link template,
+ * so an agent can answer through the x-callback API. Files with no threads left
+ * after filtering are dropped.
+ */
+export function threadsDigest(
+  files: DigestFile[],
+  opts: { scope: string; filter?: ExportFilter; vault?: string } = { scope: "vault" },
+): string {
+  const kept = files.filter((f) => f.threads.length);
+  const count = kept.reduce((n, f) => n + f.threads.length, 0);
+  const what = [
+    opts.filter?.includeResolved ? "open and resolved" : "open",
+    opts.filter?.text?.trim() ? `matching “${opts.filter.text.trim()}”` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const lines = [
+    `# review-md comments — ${opts.scope}`,
+    "",
+    `${count} thread${count === 1 ? "" : "s"} (${what}) in ${kept.length} file${kept.length === 1 ? "" : "s"}.`,
+  ];
+  for (const f of kept) {
+    lines.push("", `## ${f.path}`);
+    for (const t of f.threads) {
+      const tags = [t.resolved ? "resolved" : "open", t.outdated ? "OUTDATED" : null].filter(Boolean);
+      lines.push("", `### [${t.id}] ${anchorWhere(t.anchor)} (${tags.join(", ")})`);
+      const rev = t.rev as { ts?: string; bodyHash?: string; git?: { commit?: string } } | undefined;
+      if (rev) lines.push(`reviewed against: ${rev.git?.commit ?? rev.bodyHash ?? "?"} · ${rev.ts ?? "?"}`);
+      if (opts.vault) {
+        const q = (p: Record<string, string>) => new URLSearchParams(p).toString().replace(/\+/g, "%20");
+        lines.push(`open: obsidian://review-md-open?${q({ vault: opts.vault, file: f.path, thread: t.id })}`);
+        lines.push(
+          `reply: obsidian://review-md-reply?${q({ vault: opts.vault, file: f.path, thread: t.id })}&author=<name>&body=<url-encoded reply>`,
+        );
+      }
+      if (!t.messages.length) lines.push("", "_(no messages)_");
+      for (const m of t.messages) lines.push("", `**${m.author}** · ${m.ts}`, "", m.body);
+    }
+  }
+  if (!count) lines.push("", "_No threads match._");
+  return lines.join("\n") + "\n";
+}

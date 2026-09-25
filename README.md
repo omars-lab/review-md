@@ -49,6 +49,11 @@ reviewing, and every thread is shareable and repliable through `obsidian://` lin
 - 📝 **Sidecar storage** — threads live in a git-tracked sibling `.<name>.comments.md`
   (YAML source of truth + a GitHub-legible body), so they diff cleanly and any CLI tool
   or agent can read them.
+- 🤖 **Hand the feedback to an AI** — **Copy open threads for AI** (this file or the whole
+  vault) puts every open thread on the clipboard as one Markdown digest: where it's
+  anchored, whether it's outdated, the messages, and a reply link per thread. Paste it into
+  any chat. The same digest comes from `obsidian://review-md-export` (with `text=` to
+  pick threads mentioning some words) or from the [`reviews` CLI](#for-ai-tools-and-scripts).
 
 ---
 
@@ -189,6 +194,35 @@ review-md assumes **commits happen in the CLI, reviews happen in Obsidian**:
 
 See [`docs/designs/design.md`](docs/designs/design.md) (a dogfood doc — open it *in* the
 reviewer for the full experience) and [`docs/issues/`](docs/issues/) for the design rationale.
+
+---
+
+## For AI tools and scripts
+
+An agent working in the repo can read and answer the review without opening Obsidian.
+The `reviews` command line reads the sidecars straight from the clone; replying goes
+through Obsidian, so the plugin stays the only thing that writes them.
+
+```sh
+npm run reviews -- help                                   # every command, with examples
+npm run reviews -- stats docs                             # where is feedback waiting?
+npm run reviews -- list docs --open --waiting claude      # open threads waiting on claude
+npm run reviews -- find "frontmatter" docs                # threads mentioning some words
+npm run reviews -- show docs/designs/design.md d1a2b3     # one thread in full
+npm run reviews -- reply docs/designs/design.md d1a2b3 "Fixed in abc123." --author claude
+```
+
+Add `--json` to `list`/`find`/`show`/`stats` for structured output. The data format and
+exit codes are in [`docs/agent-contract.md`](docs/agent-contract.md).
+
+For Claude Code, the [`reviews` skill](.claude/skills/reviews/SKILL.md) runs the whole loop:
+find what's waiting → fix the doc or answer → reply on the thread. Its
+[`notes.md`](.claude/skills/reviews/notes.md) records what the CLI was missing in real
+use, which is where the next features come from.
+
+No shell? From inside Obsidian, **Copy open threads for AI** or
+`obsidian://review-md-export?vault=<vault>[&file=<path>][&text=<words>][&resolved=include]`
+puts the same digest on the clipboard.
 
 ---
 

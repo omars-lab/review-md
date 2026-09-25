@@ -22,6 +22,29 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
   scan). The manifest and the 0.1.0 assets download without a login, so testers need no
   token. Next: (3) recruit testers.
 
+- **More for agents: endpoints to wrap in the `reviews` CLI** — ranked by value for the
+  effort (brainstormed 2026-09-25, after the export URL + CLI shipped; gaps 1–2 came out of
+  the first dogfood run, [`.claude/skills/reviews/notes.md`](../.claude/skills/reviews/notes.md)).
+  1. **Resolve / reopen** — `obsidian://review-md-resolve?file&thread[&state=reopen]` +
+     `reviews resolve`. Today an agent can answer but not close, so answered threads pile
+     up as open. Small: one handler, one schema op.
+  2. **Per-passage staleness in the CLI** — move the plugin's `isThreadOutdated` logic
+     (hash just the anchored block / node / image when it can) into `src/pure.ts` and use it
+     in `reviews`. Today every thread reads OUTDATED after any edit anywhere in the doc.
+  3. **`--since <time>`** on list/find — "what's new since I last looked", for a polling
+     agent. Tiny: filter on the latest message stamp (`latestTs` already exists).
+  4. **`reviews diff <doc> <id>`** — the anchored passage as the reviewer saw it
+     (`git show <rev.git.commit>:<path>`) next to today's, so an agent sees whether the
+     point was already addressed. Small, read-only.
+  5. **Start a thread** — `obsidian://review-md-comment?file&quote=<text>&body` +
+     `reviews comment`, so an agent can review a doc, not just answer. Medium: the plugin
+     must find the passage by quote and write the `^id` into the doc.
+  6. **Get data back without the clipboard** — have `review-md-export` pass the digest to
+     `x-success` (e.g. `…?digest=`) for callers that can't read the clipboard. Small, but
+     URL length caps it; the CLI already covers reading from a clone.
+  7. **MCP server over the CLI** — list/find/show/reply as MCP tools so any agent host
+     gets them without shell access. Largest; worth it once 1–3 exist.
+
 ## Deferred
 
 - **Publish review-md as an official Obsidian community plugin** — **gated on the

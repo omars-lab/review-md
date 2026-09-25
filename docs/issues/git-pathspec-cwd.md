@@ -4,8 +4,8 @@
 
 The version stepper showed only a working-copy row and static stamps for
 `docs/designs/design.md` — no v1…v6 ladder — even though the file has six real
-commits of history and four threads stamped to real commits (`28ae788`, `b1237be`,
-`bd9dda7`). `fileRevisionOrdinals` returned an **empty map**. This only surfaced once
+commits of history and four threads stamped to real commits (`50ba884`, `1551edf`,
+`3f82635`). `fileRevisionOrdinals` returned an **empty map**. This only surfaced once
 the harness ran against the real `docs/` vault; the earlier `.dev-vault` is gitignored
 (no history at all), so the empty result there looked expected and hid the bug.
 
@@ -52,7 +52,7 @@ return { run, rel: nodePath.relative(root, abs) };
 The whole revision feature was demoed on `design.md` while it lived at the **vault
 root** (`design.md`), where `dir` *is* the root and `rel` has no leading folder — so
 the cwd/pathspec mismatch was a no-op. The move into `docs/designs/` (commit
-`38238a7`) is the same rename that broke `--follow --reverse` v-numbering
+`3b03b61`) is the same rename that broke `--follow --reverse` v-numbering
 (see [reviewed-body-across-renames.md](reviewed-body-across-renames.md)); it also
 quietly relocated the file *below* the vault root and exposed this. Verifying the
 stepper against the real git-tracked vault — not the synthetic `.dev-vault` — is what

@@ -150,7 +150,7 @@ drifts, and recover the exact reviewed text. The model has three parts:
 - **Committed version = the last commit that *touched* the md, not HEAD.** HEAD
   advances with every unrelated commit; the file's real version is the last commit
   that changed it (`git rev-list -1 --abbrev-commit HEAD -- <path>`). Example: a
-  thread on a file last edited in `28ae788` stays stamped `on 28ae788` even after
+  thread on a file last edited in `50ba884` stays stamped `on 50ba884` even after
   three later commits move HEAD on without touching it.
 - **Staleness is `bodyHash` alone.** The current body hash (frontmatter stripped)
   differs from the stored `rev.bodyHash` → **outdated**. This is git-free (works in

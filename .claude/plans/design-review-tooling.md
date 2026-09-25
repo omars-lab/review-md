@@ -110,7 +110,7 @@ review:
         bodyHash: ea936ad0  # sha256 of the doc BODY, frontmatter stripped → the staleness signal
         ts: 2026-09-20T03:08:23Z
         git:                 # present only when the file is git-tracked (identity/retrieval only)
-          commit: 8dfd923    #   short HEAD at authoring time
+          commit: ec14c64    #   short HEAD at authoring time
           blob: 31f7fa6      #   committed blob HEAD:<relpath>
       messages:
         - { author: omar,   ts: 2026-09-19T10:00:00Z, body: "why radial here?" }

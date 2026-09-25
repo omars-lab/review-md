@@ -96,8 +96,8 @@ npm run reviews -- open path/to/design.md d1a2b3         # jump to it in Obsidia
 
 The Markdown output is the same digest as the plugin's "Copy open threads for
 AI" command and `obsidian://review-md-export`. `--json` on one doc emits
-`{ uid, file, threads: [ { …thread, outdated } ] }`; on a folder,
-`{ root, files: [ { file, uid, threads } ] }` — the stable programmatic surface
+`{ uid, file, vaultPath, threads: [ { …thread, outdated } ] }`; on a folder,
+`{ root, files: [ { file, vaultPath, uid, threads } ] }` (`file` is the path on disk, ready to pass back to `show`/`reply`) — the stable programmatic surface
 for the agent. `reply`/`open` find the vault as the nearest folder above the doc
 holding `.obsidian/` (or pass `--vault`); `--dry-run` prints the URL instead.
 Exit codes: `0` OK (even with zero threads), `2` usage error, `3` no sidecar or

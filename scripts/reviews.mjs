@@ -98,6 +98,17 @@ function load(target, filter) {
   });
 }
 
+/** Keep threads whose last message isn't by `author` (all of them when no author).
+ *  Files keep their slot even when emptied — the digest skips empty ones itself. */
+function waitingOn(files, author) {
+  if (!author) return files;
+  const who = author.toLowerCase();
+  return files.map((f) => ({
+    ...f,
+    threads: f.threads.filter((t) => (t.messages.at(-1)?.author ?? "").toLowerCase() !== who),
+  }));
+}
+
 function fail(code, msg) {
   console.error(`reviews: ${msg}`);
   process.exit(code);
@@ -105,7 +116,7 @@ function fail(code, msg) {
 
 // ---- Argument parsing: positionals + a fixed set of flags per command.
 
-const VALUE_FLAGS = new Set(["text", "vault", "author"]);
+const VALUE_FLAGS = new Set(["text", "vault", "author", "waiting"]);
 const BOOL_FLAGS = new Set(["open", "unresolved", "json", "dry-run", "help"]);
 
 function parseArgs(argv) {
@@ -155,17 +166,21 @@ const url = (action, params) =>
 
 const COMMANDS = {
   list: {
-    usage: "reviews list <doc.md | folder> [--open] [--text <words>] [--vault <name>] [--json]",
+    usage: "reviews list <doc.md | folder> [--open] [--text <words>] [--waiting <name>] [--vault <name>] [--json]",
     summary: "Print the threads on a doc, or every doc under a folder",
     help: `Prints each thread: where it's anchored, open/resolved, OUTDATED when the doc
 changed since it was written, the version it was written against, and every message.
 
   --open            open threads only (--unresolved works too)
   --text <words>    only threads whose messages, authors or anchor contain the words
+  --waiting <name>  only threads where <name> didn't write the last message — what's
+                    waiting on you (e.g. --waiting claude)
   --vault <name>    add open/reply obsidian:// links per thread (the name is found
                     automatically when the folder has a .obsidian/ above it)
-  --json            JSON instead of Markdown. A single doc gives { uid, file, threads };
-                    a folder gives { root, files: [{ file, uid, threads }] }.
+  --json            JSON instead of Markdown. A single doc gives
+                    { uid, file, vaultPath, threads }; a folder gives
+                    { root, files: [{ file, vaultPath, uid, threads }] }. \`file\` is the
+                    path on disk (pass it back to show/reply); vaultPath is Obsidian's.
 
 Examples:
   reviews list docs/designs/design.md --open
@@ -174,7 +189,7 @@ Examples:
       const target = pos[0];
       if (!target) fail(2, `usage: ${this.usage}`);
       const filter = { includeResolved: !(flags.open || flags.unresolved), text: flags.text };
-      const files = load(target, filter);
+      const files = waitingOn(load(target, filter), flags.waiting);
       if (flags.json) return printJson(target, files);
       const vault = flags.vault ?? (vaultRootOf(target) ? basename(vaultRootOf(target)) : undefined);
       process.stdout.write(threadsDigest(files, { scope: target, filter, vault }));
@@ -182,7 +197,7 @@ Examples:
   },
 
   find: {
-    usage: "reviews find <words> [folder] [--open] [--json]",
+    usage: "reviews find <words> [folder] [--open] [--waiting <name>] [--json]",
     summary: "Find threads mentioning some text, across a folder (default: here)",
     help: `Case-insensitive search over message bodies, authors and what the thread is
 anchored to — the same match as the panel's search box. Resolved threads are
@@ -195,7 +210,7 @@ Examples:
       const [words, target = "."] = pos;
       if (!words) fail(2, `usage: ${this.usage}`);
       const filter = { includeResolved: !flags.open, text: words };
-      const files = load(target, filter);
+      const files = waitingOn(load(target, filter), flags.waiting);
       if (flags.json) return printJson(target, files);
       const vault = vaultRootOf(target) ? basename(vaultRootOf(target)) : undefined;
       process.stdout.write(threadsDigest(files, { scope: target, filter, vault }));
@@ -218,7 +233,7 @@ Example:
       if (flags.json) return process.stdout.write(JSON.stringify({ file: f.path, ...t }, null, 2) + "\n");
       const vault = vaultRootOf(doc) ? basename(vaultRootOf(doc)) : undefined;
       process.stdout.write(
-        threadsDigest([{ ...f, threads: [t] }], { scope: `${f.path} · ${id}`, filter: { includeResolved: true }, vault }),
+        threadsDigest([{ ...f, threads: [t] }], { scope: `${f.path} · ${id}`, filter: { includeResolved: !!t.resolved }, vault }),
       );
     },
   },
@@ -314,9 +329,11 @@ function vaultPath(doc) {
 
 function printJson(target, files) {
   const isDir = existsSync(target) && statSync(target).isDirectory();
+  // `file` is always the on-disk path, so it can be passed straight back to
+  // `show`/`reply`; `vaultPath` is the same doc as Obsidian (and the links) name it.
   const out = isDir
-    ? { root: target, files: files.map(({ path, uid, threads }) => ({ file: path, uid, threads })) }
-    : { uid: files[0].uid, file: files[0].file, threads: files[0].threads };
+    ? { root: target, files: files.map(({ file, path, uid, threads }) => ({ file, vaultPath: path, uid, threads })) }
+    : { uid: files[0].uid, file: files[0].file, vaultPath: files[0].path, threads: files[0].threads };
   process.stdout.write(JSON.stringify(out, null, 2) + "\n");
 }
 

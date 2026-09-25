@@ -14,6 +14,12 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
   testers and collect issues; (4) fix, cut `0.1.x` betas as needed; (5) **only once
   there's been a good round of beta testers** do we look at the store submission below. Cutting a release is outward-facing — needs Omar's go on the
   version number. Requested 2026-09-25 ("beta testing before official release").
+  **Progress 2026-09-25:** (1) done — `0.1.0` released. (2) done — BRAT installs 0.1.0 in
+  a clean vault and `make setup-verify` passes (see
+  [`docs/issues/setup-via-brat.md`](issues/setup-via-brat.md)). **Blocker for (3):** the
+  repo is **private**, so BRAT gets a 404 for anyone without access. Either make
+  `omars-lab/review-md` public or give each tester a GitHub token
+  (`setup-vault.mjs install --token-name`). That call is Omar's.
 
 ## Deferred
 

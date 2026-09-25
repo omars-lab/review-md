@@ -285,8 +285,10 @@ Example:
     usage: "reviews reply <doc.md> <thread-id> <message> [--author <name>] [--vault <name>] [--dry-run]",
     summary: "Reply to a thread (through Obsidian, which stays the only writer)",
     help: `Sends obsidian://review-md-reply, so the reply is written by the plugin exactly as
-if typed in the panel. Obsidian must be running with the vault open. The author
-defaults to "claude". Checks the thread exists first.
+if typed in the panel. The author defaults to "claude". Checks the thread exists
+first, then waits (up to 10s) until the reply shows up in the sidecar — exit 0 means
+it landed, exit 4 means it didn't (Obsidian closed, vault not open, a dialog in the
+way). --dry-run prints the URL and sends nothing.
 
 Example:
   reviews reply docs/designs/design.md d1a2b3 "Moved to the sidecar in 3f82635." --author claude`,
@@ -295,17 +297,23 @@ Example:
       const body = words.join(" ");
       if (!doc || !id || !body) fail(2, `usage: ${this.usage}`);
       const [f] = load(doc, { includeResolved: true });
-      if (!f.threads.some((t) => t.id === id)) fail(3, `no thread ${id} on ${doc} (try: reviews list ${doc})`);
+      const before = f.threads.find((t) => t.id === id);
+      if (!before) fail(3, `no thread ${id} on ${doc} (try: reviews list ${doc})`);
+      const vault = vaultName(doc, flags);
       openUrl(
-        url("review-md-reply", {
-          vault: vaultName(doc, flags),
-          file: vaultPath(doc),
-          thread: id,
-          author: flags.author ?? "claude",
-          body,
-        }),
+        url("review-md-reply", { vault, file: vaultPath(doc), thread: id, author: flags.author ?? "claude", body }),
         flags,
       );
+      if (flags["dry-run"]) return;
+      // The URL is fire-and-forget; the sidecar is the truth. Wait for the new message.
+      const landed = () => {
+        const t = readDoc(doc).threads.find((x) => x.id === id);
+        return t && t.messages.length > before.messages.length && t.messages.at(-1).body === body;
+      };
+      if (!waitFor(landed, 10_000)) {
+        fail(4, `reply to ${id} didn't land in 10s — is Obsidian running with vault "${vault}" open, and no dialog in the way?`);
+      }
+      process.stdout.write(`reply landed on ${id}\n`);
     },
   },
 
@@ -320,6 +328,20 @@ Example:
     },
   },
 };
+
+/** Poll `check` every 250ms until it's true or `ms` pass. Synchronous on purpose:
+ *  the CLI is one-shot, and Atomics.wait sleeps without a busy loop. */
+function waitFor(check, ms) {
+  const tick = new Int32Array(new SharedArrayBuffer(4));
+  for (const end = Date.now() + ms; Date.now() < end; Atomics.wait(tick, 0, 0, 250)) {
+    try {
+      if (check()) return true;
+    } catch {
+      // Sidecar mid-write — try again next tick.
+    }
+  }
+  return false;
+}
 
 /** A doc's path inside its vault, for obsidian:// URLs. */
 function vaultPath(doc) {

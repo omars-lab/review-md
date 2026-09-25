@@ -37,10 +37,11 @@ Use the CLI's own help rather than guessing flags.
    `git show <commit>:<path>`.
 4. **Reply on the thread** with what you did, naming the commit if you changed the doc:
    `npm run reviews -- reply <doc.md> <id> "Reworded in abc123 — …" --author claude`.
-   Needs Obsidian running with that vault open. `--dry-run` prints the URL without
+   It waits until the reply is in the sidecar: `reply landed on <id>` (exit 0) means
+   done; exit 4 means it never arrived — Obsidian not running with that vault open, or
+   a dialog in the way. Fix that and send again. `--dry-run` prints the URL without
    sending it. Replies are visible to everyone who reads the doc — keep them factual.
-5. **Confirm it landed:** `npm run reviews -- show <doc.md> <id>` shows your reply.
-6. **Log the dogfood** in [`notes.md`](notes.md): one dated line per thing that was
+5. **Log the dogfood** in [`notes.md`](notes.md): one dated line per thing that was
    useful, confusing or missing. Missing features go to `docs/backlog.md` as well.
 
 ## Don't

@@ -22,5 +22,6 @@ Fixed items say where; open ones are mirrored in `docs/backlog.md`.
 - **Noisy:** every thread shows OUTDATED because the CLI compares the whole doc's hash;
   any edit anywhere flags every thread. The plugin checks just the anchored passage when
   it can — the CLI should do the same → backlog.
+- **Fixed (same day):** `reply` returned before knowing if the write happened. It now waits for the message in the sidecar (≤10s) and exits 4 if it never lands — chosen over x-success callbacks, which would need a registered app or a browser tab per reply, and still no signal when Obsidian never gets the URL.
 - **Gotcha:** `reply` needs Obsidian running with the doc's vault open; with two Obsidian
   windows/instances the URL goes to whichever claimed the obsidian:// scheme first.

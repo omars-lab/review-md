@@ -101,7 +101,7 @@ AI" command and `obsidian://review-md-export`. `--json` on one doc emits
 for the agent. `reply`/`open` find the vault as the nearest folder above the doc
 holding `.obsidian/` (or pass `--vault`); `--dry-run` prints the URL instead.
 Exit codes: `0` OK (even with zero threads), `2` usage error, `3` no sidecar or
-no such thread, `4` couldn't hand the URL to Obsidian.
+no such thread, `4` Obsidian didn't take it (`reply` waits up to 10s for the message to appear in the sidecar and fails with `4` if it never does).
 
 `npm run threads -- <doc | folder> [--unresolved] [--json]` still works; it is
 `reviews list` under its old name.

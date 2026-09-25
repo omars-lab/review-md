@@ -1,7 +1,7 @@
 {
   "name": "review-md",
-  "version": "0.0.1",
-  "description": "Click-to-comment markdown review tool for Obsidian: anchored comment threads stored in frontmatter, shareable and repliable via obsidian:// x-callback URLs.",
+  "version": "0.1.0",
+  "description": "Click-to-comment markdown review tool for Obsidian: anchored comment threads stored in a git-tracked sidecar, shareable and repliable via obsidian:// x-callback URLs.",
   "type": "module",
   "private": true,
   "scripts": {
@@ -23,7 +23,14 @@
     "validate": "node scripts/validate-comments.mjs",
     "validate:fix": "node scripts/validate-comments.mjs --fix"
   },
-  "keywords": ["obsidian", "obsidian-plugin", "markdown", "review", "comments", "annotations"],
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "markdown",
+    "review",
+    "comments",
+    "annotations"
+  ],
   "author": "omars-lab",
   "license": "MIT",
   "devDependencies": {

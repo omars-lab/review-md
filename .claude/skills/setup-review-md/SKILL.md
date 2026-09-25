@@ -32,7 +32,8 @@ Extra flags (call the script directly):
 
 - `check --user-data-dir <dir>` — look for the vault registration in an isolated
   harness's `obsidian.json` instead of `~/Library/Application Support/obsidian`.
-- `install --token-name <name>` — **needed while `omars-lab/review-md` is private.** Stores
+- `install --token-name <name>` — only for a private repo or fork (`omars-lab/review-md`
+  is public, so testers don't need it). Stores
   `gh auth token` in Obsidian's secret storage under `<name>` (`[a-z0-9-]+`) and tells BRAT
   to use it. Without it BRAT gets a 404 and install stops with that hint.
   Make form: `make setup-install VAULT=… TOKEN_NAME=github-review-md`.

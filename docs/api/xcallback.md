@@ -46,3 +46,22 @@ Example:
 ```
 obsidian://review-md-reply?vault=docs&file=designs%2Fdesign.md&thread=d1a2b3&body=agreed%20%E2%80%94%20let's%20keep%20it%20in%20frontmatter
 ```
+
+## `obsidian://review-md-export` — Copy threads to the clipboard for an AI tool
+
+Gather comment threads — from one file, or every file in the vault — into a Markdown digest (anchor, state, messages, and an open/reply link per thread) and copy it to the clipboard, ready to paste into any AI chat. Open threads only unless `resolved=include`. The same digest `npm run reviews -- list` prints from a clone.
+
+| Param | Required | Type | Default / Enum | Description |
+|---|---|---|---|---|
+| `vault` | yes — URL only | string | — | Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). |
+| `file` | no | string | — | Vault-relative path of one file to export. Omit to export every file with comments. |
+| `text` | no | string | — | Only threads whose messages, authors or anchor contain this text (case-insensitive — the same match as the panel's search box). |
+| `resolved` | no | string | enum: `exclude`, `include` | Whether resolved threads are included. |
+| `x-success` | no | string | — | URL opened once the digest is on the clipboard (x-callback-url). |
+| `x-error` | no | string | — | URL opened when the export fails (x-callback-url). |
+
+Example:
+
+```
+obsidian://review-md-export?vault=docs
+```

@@ -25,6 +25,10 @@ import {
   ordinalsFromLog,
   mermaidBlocksFrom,
   effectiveReviewer,
+  filterThreads,
+  threadsDigest,
+  type DigestFile,
+  type ExportFilter,
 } from "./pure";
 
 // Re-export the pure helpers other modules and tests still import from here, so
@@ -199,6 +203,7 @@ export default class ReviewMdPlugin extends Plugin {
         try {
           this.validateParams(op, params);
           if (op.id === "reply") await this.handleReply(params);
+          else if (op.id === "export") await this.handleExport(params);
           else await this.handleUri(op, params);
           if (params["x-success"]) window.open(String(params["x-success"]));
         } catch (err) {
@@ -263,6 +268,25 @@ export default class ReviewMdPlugin extends Plugin {
       id: "copy-reply-link",
       name: "Copy reply-link template for the selected thread",
       callback: () => void this.copyFocusedThreadLink("reply"),
+    });
+
+    // Export for AI tools: the same Markdown digest as scripts/review-threads.mjs
+    // and the `review-md-export` URL, on the clipboard — for tools that can't read
+    // the vault (a chat window) and for testers who only have the plugin.
+    this.addCommand({
+      id: "copy-threads-for-ai-file",
+      name: "Copy open threads for AI (this file)",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== "md") return false;
+        if (!checking) void this.copyThreadsDigest({}, file);
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "copy-threads-for-ai-vault",
+      name: "Copy open threads for AI (whole vault)",
+      callback: () => void this.copyThreadsDigest({}),
     });
 
     // POC-6: augmented mermaid render. Obsidian renders mermaid through its own
@@ -1598,6 +1622,40 @@ export default class ReviewMdPlugin extends Plugin {
     const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_COMMENTS)[0]?.view;
     if (view instanceof CommentsView) await view.copyFocusedLink(kind);
     else new Notice("review-md: open the comments sidebar and select a thread first");
+  }
+
+  /** The export digest for one file, or every file with a sidecar: threads kept by
+   *  `filter`, each flagged outdated the same way the panel does. */
+  async threadsDigestFor(filter: ExportFilter, file?: TFile): Promise<{ text: string; count: number }> {
+    const docs = file ? [file] : this.app.vault.getMarkdownFiles();
+    const files: DigestFile[] = [];
+    for (const f of docs) {
+      if (!(await this.app.vault.adapter.exists(this.sidecarPathFor(f)))) continue;
+      const kept = filterThreads(await this.readThreads(f), filter);
+      const threads = await Promise.all(
+        kept.map(async (t) => ({ ...t, outdated: await this.isThreadOutdated(f, t) })),
+      );
+      files.push({ path: f.path, threads });
+    }
+    files.sort((a, b) => a.path.localeCompare(b.path));
+    const vault = this.app.vault.getName();
+    return {
+      text: threadsDigest(files, { scope: file ? file.path : `vault “${vault}”`, filter, vault }),
+      count: files.reduce((n, f) => n + f.threads.length, 0),
+    };
+  }
+
+  /** Copy the export digest to the clipboard and say how much went. */
+  private async copyThreadsDigest(filter: ExportFilter, file?: TFile): Promise<void> {
+    const { text, count } = await this.threadsDigestFor(filter, file);
+    await navigator.clipboard.writeText(text);
+    new Notice(`review-md: copied ${count} thread${count === 1 ? "" : "s"} for AI`);
+  }
+
+  /** `export` action: the digest for `file` (or the vault), filtered, to the clipboard. */
+  private async handleExport(params: Record<string, string>): Promise<void> {
+    const file = params.file ? this.resolveFile(params.file) : undefined;
+    await this.copyThreadsDigest({ includeResolved: params.resolved === "include", text: params.text }, file);
   }
 
   /** Resolve + open the target file and, when a thread param is present, jump to

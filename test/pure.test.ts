@@ -40,6 +40,9 @@ import {
   anchorLineIn,
   startsFolded,
   FOLD_OVER,
+  anchorWhere,
+  filterThreads,
+  threadsDigest,
 } from "../src/pure.ts";
 import type { ThreadLike } from "../src/pure.ts";
 
@@ -102,7 +105,7 @@ test("bodyHash ignores frontmatter churn but tracks body edits", async () => {
   assert.notEqual(await bodyHash(a), await bodyHash(c), "a body edit must move the hash");
 });
 
-test("bodyHash stays in sync with scripts/review-threads.mjs (node:crypto)", async () => {
+test("bodyHash stays in sync with scripts/reviews.mjs (node:crypto)", async () => {
   // The .mjs mirror hashes stripBlockIds(stripFrontmatter(text)) with node:crypto,
   // sliced to 12 hex. If the pure layer and the mirror ever drift, staleness
   // computed in-plugin and by the CLI disagree — pin them equal.
@@ -455,4 +458,34 @@ test("startsFolded: resolved threads and threads longer than FOLD_OVER start fol
   assert.equal(startsFolded(thread("t1", { resolved: true })), true);
   assert.equal(startsFolded(thread("t1", { messages: Array(FOLD_OVER).fill(msg) })), false);
   assert.equal(startsFolded(thread("t1", { messages: Array(FOLD_OVER + 1).fill(msg) })), true);
+});
+
+test("anchorWhere names every anchor type in one line", () => {
+  assert.equal(anchorWhere({ type: "mermaidNode", node: "CS" }), "diagram node CS");
+  assert.equal(anchorWhere({ type: "mermaidEdge", from: "A", to: "B" }), "diagram edge A → B");
+  assert.equal(anchorWhere({ type: "image", src: "a.png" }), "image a.png");
+  assert.equal(anchorWhere({ type: "link", quote: "the API", href: "api.md" }), "link “the API” → api.md");
+  assert.equal(anchorWhere({ type: "header", quote: "Intro\n  text" }), "“Intro text”");
+  assert.equal(anchorWhere({ type: "text" }), "text");
+});
+
+test("filterThreads: open only by default, resolved on request, text narrows", () => {
+  const ts = [thread("a"), thread("b", { resolved: true }), thread("c")];
+  assert.deepEqual(filterThreads(ts).map((t) => t.id), ["a", "c"]);
+  assert.deepEqual(filterThreads(ts, { includeResolved: true }).map((t) => t.id), ["a", "b", "c"]);
+  assert.deepEqual(filterThreads(ts, { text: "FIRST C" }).map((t) => t.id), ["c"]);
+});
+
+test("threadsDigest: per-file sections, state tags, links only with a vault, empty files dropped", () => {
+  const files = [
+    { path: "a b.md", threads: [{ ...thread("t1"), outdated: true }] },
+    { path: "empty.md", threads: [] },
+  ];
+  const plain = threadsDigest(files, { scope: "vault", filter: { text: "first" } });
+  assert.match(plain, /^# review-md comments — vault\n\n1 thread \(open, matching “first”\) in 1 file\./);
+  assert.match(plain, /## a b\.md\n\n### \[t1\] “quote t1” \(open, OUTDATED\)\nreviewed against: 1234567/);
+  assert.doesNotMatch(plain, /empty\.md|obsidian:\/\//);
+  const linked = threadsDigest(files, { scope: "vault", vault: "My Vault" });
+  assert.match(linked, /open: obsidian:\/\/review-md-open\?vault=My%20Vault&file=a%20b\.md&thread=t1/);
+  assert.match(threadsDigest([], { scope: "x" }), /_No threads match\._/);
 });

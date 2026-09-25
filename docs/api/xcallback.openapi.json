@@ -166,6 +166,88 @@
           }
         }
       }
+    },
+    "/review-md-export": {
+      "get": {
+        "operationId": "export",
+        "summary": "Copy threads to the clipboard for an AI tool",
+        "description": "Gather comment threads — from one file, or every file in the vault — into a Markdown digest (anchor, state, messages, and an open/reply link per thread) and copy it to the clipboard, ready to paste into any AI chat. Open threads only unless `resolved=include`. The same digest `npm run reviews -- list` prints from a clone.\n\nInvoke as: `obsidian://review-md-export?…`\n\nExample: `obsidian://review-md-export?vault=docs`",
+        "parameters": [
+          {
+            "name": "vault",
+            "in": "query",
+            "required": true,
+            "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "docs"
+          },
+          {
+            "name": "file",
+            "in": "query",
+            "required": false,
+            "description": "Vault-relative path of one file to export. Omit to export every file with comments.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "designs/design.md"
+          },
+          {
+            "name": "text",
+            "in": "query",
+            "required": false,
+            "description": "Only threads whose messages, authors or anchor contain this text (case-insensitive — the same match as the panel's search box).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "frontmatter"
+          },
+          {
+            "name": "resolved",
+            "in": "query",
+            "required": false,
+            "description": "Whether resolved threads are included.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "exclude",
+                "include"
+              ],
+              "default": "exclude"
+            },
+            "example": "include"
+          },
+          {
+            "name": "x-success",
+            "in": "query",
+            "required": false,
+            "description": "URL opened once the digest is on the clipboard (x-callback-url).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "myapp://exported"
+          },
+          {
+            "name": "x-error",
+            "in": "query",
+            "required": false,
+            "description": "URL opened when the export fails (x-callback-url).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "myapp://failed"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success. If `x-success` was supplied, that URL is opened."
+          },
+          "400": {
+            "description": "Missing or invalid parameters. If `x-error` was supplied, that URL is opened."
+          }
+        }
+      }
     }
   }
 }

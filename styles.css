@@ -1,4 +1,28 @@
 /* review-md styles — grows with the comment UI. */
+
+/* Comment amber — the marker colour for review-md's comment UI. Two surfaces,
+   two behaviours, so it stays legible in both themes:
+   - Sidebar chips (the node/edge type badge, the "hidden" filter chip) sit on
+     Obsidian's own background, so they follow the theme — a deeper set under the
+     dark theme blends with the dark sidebar instead of a bright pale pill.
+   - Diagram amber (the overlay badges and the recoloured commented node) sits on
+     the mermaid canvas, which Obsidian renders light — dark labels on light
+     fills — in BOTH themes. So it stays a fixed light amber; a dark fill would
+     hide mermaid's own dark node label. */
+body {
+  --review-md-amber-bg: #fff3bf;
+  --review-md-amber-line: #f0c000;
+  --review-md-amber-text: #5c3d00;
+  --review-md-diagram-amber-bg: #fff3bf;
+  --review-md-diagram-amber-line: #f0c000;
+  --review-md-diagram-amber-text: #5c3d00;
+}
+body.theme-dark {
+  --review-md-amber-bg: #463500;
+  --review-md-amber-line: #d9b310;
+  --review-md-amber-text: #ffe9a8;
+}
+
 .review-md-thread-badge {
   cursor: pointer;
 }
@@ -129,13 +153,68 @@
 }
 /* The "hidden" chip, when active, tints amber to echo the drift/outdated cue. */
 .review-md-chip[data-cat="hidden"].is-active {
-  color: #7a5600;
-  background: #fff3bf;
-  border-color: #f0c000;
+  color: var(--review-md-amber-text);
+  background: var(--review-md-amber-bg);
+  border-color: var(--review-md-amber-line);
 }
 
-/* A card filtered out by the chips. */
+/* Tools row (search · sort) — its own full-width line under the chips so the
+   search box gets the room a narrow sidebar has. */
+.review-md-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  flex: 1 1 100%;
+}
+.review-md-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  height: auto;
+  padding: 2px var(--size-2-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+.review-md-search:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: none;
+}
+/* Sort menu button: same compact chrome as the Revisions dropdown. */
+.review-md-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  padding: 1px var(--size-2-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: none;
+  height: auto;
+}
+.review-md-sort:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border-hover);
+}
+.review-md-sort .svg-icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* A card filtered out by the chips or the search box. */
 .review-md-thread.is-filtered-out {
+  display: none;
+}
+/* Toggled (not rebuilt) parts of the panel: the "no threads yet" note and a
+   card's resolved pill are hidden via the attribute so a surgical update can
+   flip them without touching neighbours. */
+.review-md-comments [hidden] {
   display: none;
 }
 
@@ -145,6 +224,8 @@
   padding: var(--size-4-2);
   margin: var(--size-4-3) 0;
   background: var(--background-secondary);
+  /* Keep a focused card clear of the sticky header (height set by focusThread). */
+  scroll-margin-top: calc(var(--review-md-header-h, 0px) + var(--size-4-3) + var(--size-4-2));
 }
 .review-md-thread.is-resolved {
   opacity: 0.6;
@@ -192,9 +273,9 @@
    recoloured node/edge in the diagram. */
 .review-md-type-badge[data-type="node"],
 .review-md-type-badge[data-type="edge"] {
-  color: #5c3d00;
-  background: #fff3bf;
-  border-color: #f0c000;
+  color: var(--review-md-amber-text);
+  background: var(--review-md-amber-bg);
+  border-color: var(--review-md-amber-line);
 }
 
 /* Share — top-right icon on each card (moved out of the action row). */
@@ -223,8 +304,37 @@
   padding: var(--size-4-1) 0;
   border-top: 1px solid var(--background-modifier-border-hover);
 }
-.review-md-message:first-child {
+.review-md-message:first-child,
+.review-md-fold + .review-md-message {
   border-top: none;
+}
+/* Fold toggle ("Show N earlier" / "Hide earlier") at the head of a multi-
+   message thread: a quiet text button; the chevron turns when open. */
+.review-md-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  padding: 0 var(--size-2-1);
+  margin: 0 0 var(--size-2-1);
+  height: auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+.review-md-fold:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+.review-md-fold .svg-icon {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.1s ease;
+}
+.review-md-fold.is-open .review-md-fold-icon .svg-icon {
+  transform: rotate(90deg);
 }
 .review-md-meta {
   display: flex;
@@ -240,8 +350,27 @@
 }
 .review-md-body {
   font-size: var(--font-ui-small);
-  white-space: pre-wrap;
   word-break: break-word;
+}
+/* Bodies are rendered Markdown (MarkdownRenderer wraps blocks in <p>/<ul>/…).
+   Strip the outer block margins so a short comment stays tight, while keeping
+   modest spacing between multiple blocks in a longer one. */
+.review-md-body > :first-child {
+  margin-top: 0;
+}
+.review-md-body > :last-child {
+  margin-bottom: 0;
+}
+.review-md-body p {
+  margin: var(--size-2-2) 0;
+}
+.review-md-body ul,
+.review-md-body ol {
+  margin: var(--size-2-2) 0;
+  padding-inline-start: 1.4em;
+}
+.review-md-body pre {
+  margin: var(--size-4-1) 0;
 }
 
 .review-md-reply {
@@ -279,7 +408,8 @@
   opacity: 0;
   transition: opacity 0.1s ease;
 }
-.review-md-message:hover .review-md-edit.clickable-icon {
+.review-md-message:hover .review-md-edit.clickable-icon,
+.review-md-edit.clickable-icon:focus-visible {
   opacity: 0.7;
 }
 .review-md-edit.clickable-icon:hover {
@@ -288,6 +418,34 @@
 .review-md-edit .svg-icon {
   width: 13px;
   height: 13px;
+}
+
+/* Per-message delete (trash), revealed on hover/focus like the edit pencil;
+   danger tint, and the shared two-step "arm" state widens to show "Delete?". */
+.review-md-msg-del.clickable-icon {
+  padding: 2px;
+  opacity: 0;
+  color: var(--text-muted);
+  transition: opacity 0.1s ease;
+}
+.review-md-message:hover .review-md-msg-del.clickable-icon,
+.review-md-msg-del.clickable-icon:focus-visible,
+.review-md-msg-del.is-armed {
+  opacity: 0.7;
+}
+.review-md-msg-del.clickable-icon:hover {
+  opacity: 1;
+  color: var(--text-error);
+}
+.review-md-msg-del .svg-icon {
+  width: 13px;
+  height: 13px;
+}
+.review-md-msg-del.is-armed {
+  opacity: 1;
+  background-color: var(--background-modifier-error);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-smaller);
 }
 .review-md-edit-box {
   margin: var(--size-4-1) 0;
@@ -367,6 +525,28 @@
   word-break: break-word;
 }
 
+/* Link anchor: the display text over its target href, so the card shows both
+   halves of what was commented on. */
+.review-md-link-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+  margin: var(--size-4-1) 0;
+  padding: var(--size-2-2) var(--size-4-2);
+  border-left: 3px solid var(--interactive-accent);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+.review-md-link-text {
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+}
+.review-md-link-href {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  word-break: break-all;
+}
+
 /* ---- Version staleness (rev stamp) ---- */
 .review-md-rev {
   display: none;
@@ -403,38 +583,65 @@
   width: 12px;
   height: 12px;
 }
-/* Content Revisions — a collapsed accordion at the foot of the card. */
-.review-md-revisions {
-  margin-top: var(--size-4-2);
-  border-top: 1px solid var(--background-modifier-border);
-  padding-top: var(--size-4-1);
-}
-.review-md-revisions-summary {
-  display: flex;
+/* Version stepper — ‹ vK (sha) › in place of the old static stamp. Left steps
+   toward the latest version, right toward older ones; the centred label names
+   the version and toggles an inline content preview. */
+.review-md-verstep {
+  display: inline-flex;
   align-items: center;
   gap: var(--size-2-1);
-  list-style: none;
-  cursor: pointer;
+}
+.review-md-verstep-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  box-shadow: none;
   color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  user-select: none;
+  cursor: pointer;
 }
-.review-md-revisions-summary::-webkit-details-marker {
-  display: none;
-}
-.review-md-revisions-summary:hover {
+.review-md-verstep-btn:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
-.review-md-revisions-caret {
-  display: inline-flex;
-  transition: transform 120ms ease;
+.review-md-verstep-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
-.review-md-revisions-caret .svg-icon {
-  width: 13px;
-  height: 13px;
+.review-md-verstep-btn .svg-icon {
+  width: 14px;
+  height: 14px;
 }
-.review-md-revisions[open] .review-md-revisions-caret {
-  transform: rotate(90deg);
+.review-md-verstep-label {
+  padding: 2px var(--size-2-2);
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.review-md-verstep-label:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.review-md-verstep-label.is-authored {
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+.review-md-verstep.is-open .review-md-verstep-label {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.review-md-verpreview {
+  flex-basis: 100%;
 }
 .review-md-reviewed {
   margin: var(--size-4-1) 0;
@@ -468,6 +675,29 @@ body.review-md-comment-mode .markdown-preview-view * {
 .side-dock-ribbon-action.is-active {
   color: var(--text-accent);
 }
+/* Status-bar indicator shown only while comment mode is armed. */
+.status-bar-item.review-md-status {
+  color: var(--text-accent);
+  font-weight: var(--font-semibold);
+}
+
+/* ---- Draft composer (a click in comment mode → compose before writing) ---- */
+/* Reuses the thread card, tinted with the accent so it reads as "not saved yet". */
+.review-md-thread.review-md-draft {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+  background: var(--background-primary-alt);
+}
+.review-md-draft-tag {
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-radius: var(--radius-s);
+  padding: 0 var(--size-4-1);
+}
 
 /* ---- Flash highlight (bidirectional link: click a thread → find its region) ---- */
 .review-md-flash {
@@ -487,15 +717,19 @@ body.review-md-comment-mode .markdown-preview-view * {
 
 /* Mermaid comment badge: a 💬 pill overlaid on a commented node (top-right
    corner) or at a commented edge's midpoint. Shared style for both. */
+.review-md-edge-badge,
+.review-md-node-badge {
+  cursor: pointer;
+}
 .review-md-edge-badge circle,
 .review-md-node-badge circle {
-  fill: #fff3bf;
-  stroke: #f0c000;
+  fill: var(--review-md-diagram-amber-bg);
+  stroke: var(--review-md-diagram-amber-line);
   stroke-width: 1.5px;
 }
 .review-md-edge-badge text,
 .review-md-node-badge text {
-  fill: #5c3d00;
+  fill: var(--review-md-diagram-amber-text);
   font-size: 11px;
   font-weight: 600;
   pointer-events: none;
@@ -517,8 +751,8 @@ g.node.review-md-commented > rect,
 g.node.review-md-commented > polygon,
 g.node.review-md-commented > circle,
 g.node.review-md-commented > path {
-  fill: #fff3bf !important;
-  stroke: #f0c000 !important;
+  fill: var(--review-md-diagram-amber-bg) !important;
+  stroke: var(--review-md-diagram-amber-line) !important;
   stroke-width: 2px !important;
 }
 

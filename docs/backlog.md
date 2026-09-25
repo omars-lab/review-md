@@ -11,13 +11,21 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
   plugin to `community-plugins.json`, passing Obsidian's automated + human review
   (plugin guidelines: no `innerHTML`/`outerHTML` assignment, proper `onunload`
   teardown, `isDesktopOnly` honoured, no network calls without disclosure, etc.),
-  and a tagged GitHub release (already automated via `make release`). Pre-req cleanup
-  before submitting: the audit's open findings — esp. **#1 MutationObserver +
-  MarkdownView leak on closed tabs** (lifecycle teardown is exactly what reviewers
-  check) — plus a scan for any `innerHTML` usage. Until this lands, BRAT
-  (`omars-lab/review-md`) is the install path. Requested 2026-09-21. ROI: high value
-  (widest reach, best UX) but gated on review turnaround (days–weeks) and the
-  lifecycle fixes; do the hardening pass first, then submit.
+  and a tagged GitHub release (already automated via `make release`). **The
+  hardening pass is done** — full record in
+  [`docs/issues/community-plugin-hardening.md`](issues/community-plugin-hardening.md):
+  the `MutationObserver`/`MarkdownView` leak (audit #1) is fixed, the two
+  `innerHTML` SVG injects now go through a `DOMParser`-based `setSvg` helper, the
+  sample-plugin `console.log`s and the two inline `.style.cursor` assignments are
+  gone, and the POC-4 dev command + the POC-1/POC-4 vault-report writers were
+  removed so no dev scaffolding ships. `isDesktopOnly: true` and command naming
+  already correct. The last soft item — the badge palette's hard-coded amber
+  hex — is now centralised into theme-aware CSS variables (sidebar chips follow
+  light/dark; the diagram amber stays fixed-light because the mermaid canvas is
+  light in both themes). No soft items remain. Ready to submit;
+  until it lands, BRAT (`omars-lab/review-md`) is the install path. Requested
+  2026-09-21. ROI: high value (widest reach, best UX), gated only on Obsidian's
+  review turnaround (days–weeks).
 
 - ~~**Make `docs/` the tracked Obsidian dev vault so Revisions v-numbers render**~~ —
   **DONE 2026-09-21.** `git mv design.md → docs/designs/design.md` (history preserved),
@@ -34,17 +42,18 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
   `MutationObserver` on the render container (unified with the Live-Preview augmenter via
   `ensureMermaidAugmenter`). Pivot record: [`docs/issues/mermaid-augment-lifecycle.md`](issues/mermaid-augment-lifecycle.md).
 
-- **Comment on a link (`link` anchor type)** — in comment mode, **double-clicking a link**
-  selects the *entire* link and starts a thread anchored to it (rather than the surrounding
-  `text` block). New anchor type `link` alongside `text`/`header`/`image`/`mermaidNode`/
-  `mermaidEdge`; likely fields: `href` (the link target — internal `[[wikilink]]` or external
-  URL), `quote` (the link display text), and the existing `line`/`blockId` for fallback. Render:
-  the reviewer highlights the whole `<a>`/`.internal-link`/`.external-link` element on
-  double-click and anchors there. Staleness (`anchorContentFor`) extracts the link's
-  href+text. Additive — extends the anchor union and `validate-comments` `ANCHOR_REQUIRED`,
-  no breaking change. Requested 2026-09-21. ROI: medium — reuses the click-to-comment plumbing;
-  the new work is link-element hit detection (double-click vs the single-click block anchor) and
-  the extraction case. Pull into a small POC or issue note when picked up.
+- ~~**Comment on a link (`link` anchor type)**~~ — **DONE 2026-09-21.** New `link` anchor
+  type alongside `text`/`header`/`image`/`mermaidNode`/`mermaidEdge`, fields `href` (internal
+  `[[wikilink]]` target read off `data-href`, or an external URL off `href`) + `quote` (display
+  text). **Design deviation from the spec:** kept the existing **single-click** comment-mode
+  path rather than adding a double-click gesture — `resolveClickAnchor` gains an `<a>` hit-test
+  after `img` and before the text fallback, so clicking a link in comment mode anchors to the
+  link and clicking prose still anchors to the block. Double-click would have been inconsistent
+  with every other anchor type and more code for no gain. Wired at all eleven per-type sites
+  (create, staleness `anchorContentFor`, `highlightAnchor` flash/scroll, sidecar body, card
+  badge + inline preview, CLI `anchorWhere`, `validate-comments` `ANCHOR_REQUIRED: href+quote`).
+  Verified live end-to-end in the harness (internal + external link → correct anchor; staleness
+  present/removed; card badge + preview render; flash locates the `<a>`).
 
 - **In-image coordinate/region pinning** — anchor a comment to a specific point or rectangle inside
   an image, not just the image as a whole. Traded off 2026-09-19 ("we don't need coordinates for

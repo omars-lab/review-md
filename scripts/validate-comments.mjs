@@ -32,7 +32,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 const GIT_TIMEOUT_MS = 4000;
 const SIDECAR_RE = /(^|\/)\.[^/]+\.comments\.md$/;
-const ANCHOR_TYPES = new Set(["text", "mermaidNode", "mermaidEdge", "header", "image"]);
+const ANCHOR_TYPES = new Set(["text", "mermaidNode", "mermaidEdge", "header", "image", "link"]);
 // Per-anchor-type fields that must be present and non-empty strings.
 const ANCHOR_REQUIRED = {
   text: ["quote"],
@@ -40,6 +40,7 @@ const ANCHOR_REQUIRED = {
   mermaidNode: ["node"],
   mermaidEdge: ["from", "to"],
   image: ["src"],
+  link: ["href", "quote"],
 };
 
 const args = process.argv.slice(2);

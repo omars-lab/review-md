@@ -53,6 +53,8 @@ function anchorWhere(a = {}) {
       return `diagram edge ${a.from} → ${a.to}`;
     case "image":
       return `image ${a.src}`;
+    case "link":
+      return `link ${a.quote ? `“${String(a.quote).replace(/\s+/g, " ").slice(0, 60)}” ` : ""}→ ${a.href ?? ""}`;
     case "text":
     default:
       return a.quote ? `“${String(a.quote).replace(/\s+/g, " ").slice(0, 100)}”` : a.type ?? "text";

@@ -1,5 +1,8 @@
 import {
+  App,
   Plugin,
+  PluginSettingTab,
+  Setting,
   Notice,
   TFile,
   MarkdownView,
@@ -20,6 +23,8 @@ import {
   sha256Short,
   bodyHash,
   ordinalsFromLog,
+  mermaidBlocksFrom,
+  effectiveReviewer,
 } from "./pure";
 
 // Re-export the pure helpers other modules and tests still import from here, so
@@ -59,22 +64,24 @@ interface ReviewMdSettings {
   /** Show the augmented mermaid comment nodes / edge badges in the live render.
    *  Off → diagrams render 100% native (comments still exist in the sidecar). */
   showMermaidComments: boolean;
+  /** The name new comments/replies authored from the sidebar are stamped with.
+   *  Blank → the effective author is the generic `"reviewer"` (never a specific
+   *  person's name — that's not a sensible shipped default). See effectiveAuthor. */
+  reviewerName: string;
 }
 const DEFAULT_SETTINGS: ReviewMdSettings = {
   showMermaidComments: true,
+  reviewerName: "",
 };
 
 /**
- * review-md — scaffold entry point.
+ * review-md — plugin entry point.
  *
- * Minimal on purpose: it stands up the plugin, registers the
- * `obsidian://review-md` protocol handler (POC-1), and ships a self-reporting
- * POC-4 command that exercises processFrontMatter at scale. Both POCs write a
- * report note into the vault so results are verifiable from the file system
- * (no dev console needed). See docs/pocs/.
+ * Stands up the plugin: the click-to-comment UI, the comments sidebar, the
+ * mermaid overlay augmenter, and the `obsidian://review-md` x-callback protocol
+ * handlers (share / reply / open links). Design and the earlier proof-of-concept
+ * notes live in docs/pocs/ and docs/designs/.
  */
-
-const POC4_THREADS = 50;
 
 export interface ReviewMessage { author: string; ts: string; body: string; }
 /**
@@ -146,32 +153,13 @@ function nodeRequire(mod: string): any {
 const MERMAID_SHAPES =
   "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
 
-const POC4_BODIES = [
-  "why radial here? seems arbitrary",
-  'key: value looking text with "quotes" and a trailing colon:',
-  "multi-line\nreply with a second line\n- and a bullet",
-  "# looks like a heading and `code` and [a link](https://x.test)",
-  "unicode ✓ diacritics ū ḥ ʿ emoji 🎯 keep intact",
-];
-
-function makePoc4Thread(i: number): ReviewThread {
-  const id = mkId();
-  const anchor =
-    i % 5 === 0
-      ? { type: "image", src: `img/plate-${i}.png` }
-      : { type: "text", line: i * 3, blockId: id, quote: `anchored phrase number ${i}` };
-  const messages: ReviewMessage[] = Array.from({ length: (i % 4) + 1 }, (_, m) => ({
-    author: m % 2 === 0 ? "omar" : "claude",
-    ts: new Date(Date.UTC(2026, 8, 19, 10, i % 60, m % 60)).toISOString(),
-    body: POC4_BODIES[(i + m) % POC4_BODIES.length],
-  }));
-  return { id, anchor, resolved: i % 7 === 0, messages };
-}
-
 export default class ReviewMdPlugin extends Plugin {
   /** True while "comment mode" is armed: the reader is click-to-comment. */
   private commentMode = false;
   private commentRibbon: HTMLElement | null = null;
+  /** Status-bar indicator shown only while comment mode is armed, so the reader
+   *  can tell the plugin owns their clicks (the reading view looks native otherwise). */
+  private commentStatus: HTMLElement | null = null;
   settings: ReviewMdSettings = { ...DEFAULT_SETTINGS };
   /** Live Preview mermaid augmenter state. Markdown post-processors never fire in
    *  the CM6 editor (only in reading view / fully-rendered embeds), so the overlay
@@ -193,8 +181,11 @@ export default class ReviewMdPlugin extends Plugin {
   private rvAugmenting = new WeakSet<HTMLElement>();
 
   async onload(): Promise<void> {
-    console.log("[review-md] loaded");
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+
+    // Settings tab: reviewer identity (#6) + the mermaid-overlay toggle, so both
+    // preferences are reachable from Settings, not only a command.
+    this.addSettingTab(new ReviewMdSettingTab(this.app, this));
 
     // One Obsidian action per operation: obsidian://review-md-open?..., review-md-reply?...
     // We can't use a single handler with an `action`/`op` query selector because
@@ -274,12 +265,6 @@ export default class ReviewMdPlugin extends Plugin {
       callback: () => void this.copyFocusedThreadLink("reply"),
     });
 
-    this.addCommand({
-      id: "poc4-seed-verify-frontmatter",
-      name: "POC-4 seed & verify frontmatter threads",
-      callback: () => void this.runPoc4(),
-    });
-
     // POC-6: augmented mermaid render. Obsidian renders mermaid through its own
     // markdown renderer (not the public code-block registry), so we can't override
     // it with registerMarkdownCodeBlockProcessor. A markdown post-processor is also
@@ -334,11 +319,29 @@ export default class ReviewMdPlugin extends Plugin {
     });
   }
 
-  /** Flip the mermaid-overlay preference, persist it, and re-render open reading
-   *  views so the change takes effect immediately (both directions). */
-  private async toggleMermaidComments(): Promise<void> {
-    this.settings.showMermaidComments = !this.settings.showMermaidComments;
+  /** Persist the current settings object (the one `saveData`/`loadData` path). */
+  async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  /** The author name new sidebar-authored messages are stamped with: the trimmed
+   *  reviewer name, or the generic `"reviewer"` when unset. Single source for both
+   *  the draft composer's first comment and sidebar replies. */
+  effectiveAuthor(): string {
+    return effectiveReviewer(this.settings.reviewerName);
+  }
+
+  /** Flip the mermaid-overlay preference (command-palette entry point). */
+  private async toggleMermaidComments(): Promise<void> {
+    await this.setShowMermaidComments(!this.settings.showMermaidComments);
+  }
+
+  /** Set the mermaid-overlay preference, persist it, and re-render open reading
+   *  views so the change takes effect immediately (both directions). Shared by the
+   *  toggle command and the settings tab. */
+  async setShowMermaidComments(on: boolean): Promise<void> {
+    this.settings.showMermaidComments = on;
+    await this.saveSettings();
     const views = this.app.workspace
       .getLeavesOfType("markdown")
       .map((l) => l.view)
@@ -386,7 +389,14 @@ export default class ReviewMdPlugin extends Plugin {
     const obs = new MutationObserver(scan);
     obs.observe(cm.contentDOM, { childList: true, subtree: true });
     this.lpObservers.set(view, obs);
-    this.register(() => obs.disconnect());
+    // Tie teardown to the VIEW, not the plugin: a plugin-lifetime `this.register`
+    // would retain `obs` — and via its `scan` closure the whole (closed) view —
+    // until the plugin unloads, defeating the WeakMap. `view.register` fires when
+    // the tab/leaf is detached, disconnecting and dropping the entry then.
+    view.register(() => {
+      obs.disconnect();
+      this.lpObservers.delete(view);
+    });
     void this.scanLivePreviewMermaid(view);
   }
 
@@ -412,7 +422,12 @@ export default class ReviewMdPlugin extends Plugin {
     const obs = new MutationObserver(scan);
     obs.observe(container, { childList: true, subtree: true });
     this.rvObservers.set(view, obs);
-    this.register(() => obs.disconnect());
+    // Teardown tied to the view (see ensureLivePreviewAugmenter): fires on tab
+    // close so a closed reading view isn't pinned in memory by its observer.
+    view.register(() => {
+      obs.disconnect();
+      this.rvObservers.delete(view);
+    });
     void this.scanReadingViewMermaid(view);
   }
 
@@ -571,8 +586,21 @@ export default class ReviewMdPlugin extends Plugin {
   }
 
   onunload(): void {
-    console.log("[review-md] unloaded");
     document.body.removeClass("review-md-comment-mode");
+    this.commentStatus?.remove();
+    this.commentStatus = null;
+    // Views closed during the session were cleaned by their own `view.register`.
+    // Any still-open markdown view's observer must be disconnected here — walk the
+    // live leaves rather than a retained list, so we never hold a closed view.
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof MarkdownView) {
+        this.lpObservers.get(view)?.disconnect();
+        this.lpObservers.delete(view);
+        this.rvObservers.get(view)?.disconnect();
+        this.rvObservers.delete(view);
+      }
+    }
   }
 
   /** Reveal the comments sidebar (reusing an open one), then focus it. */
@@ -588,11 +616,24 @@ export default class ReviewMdPlugin extends Plugin {
 
   // ---- Comment mode: click-to-comment authoring (req 2) ----
 
-  /** Arm/disarm comment mode: toggles the body class (cursor + affordances). */
+  /** Arm/disarm comment mode: toggles the body class (crosshair cursor + click
+   *  affordances) and shows a persistent status-bar indicator while it's on, so the
+   *  reader can tell the plugin owns their clicks. */
   private setCommentMode(on: boolean): void {
     this.commentMode = on;
     document.body.toggleClass("review-md-comment-mode", on);
     this.commentRibbon?.toggleClass("is-active", on);
+    if (on) {
+      if (!this.commentStatus) {
+        this.commentStatus = this.addStatusBarItem();
+        this.commentStatus.addClass("review-md-status");
+        this.commentStatus.setText("✍️ review-md: comment mode");
+        this.commentStatus.setAttribute("aria-label", "Comment mode is on — click the document to comment");
+      }
+    } else {
+      this.commentStatus?.remove();
+      this.commentStatus = null;
+    }
     new Notice(`review-md: comment mode ${on ? "on — click to comment" : "off"}`);
   }
 
@@ -673,22 +714,23 @@ export default class ReviewMdPlugin extends Plugin {
       target,
       editor ? { editor, x: evt.clientX, y: evt.clientY } : undefined,
     );
-    // Clear the selection so the highlight flash reads cleanly afterwards.
+    // Clear the selection so the anchor preview reads cleanly afterwards.
     window.getSelection()?.removeAllRanges();
 
-    // A previous click that never got a first comment left an empty thread —
-    // clicking again abandons it, so sweep empties before minting the new one.
-    await this.pruneEmptyThreads(file);
+    // Don't mint a thread on the raw click any more (that littered the sidecar with
+    // empty threads on every mis-click). Instead open the sidebar and hand the
+    // anchor to a draft composer — the thread is written only if the user commits a
+    // comment, and Cancel discards it with no sidecar write.
+    // See docs/issues/comment-draft-composer.md.
+    await this.activateCommentsView();
+    this.openDraftComposer(file, anchor);
+    new Notice(`review-md: draft comment on ${describeAnchorShort(anchor)} — write a comment or cancel`);
+  }
 
-    try {
-      const id = await this.createThread(file, anchor);
-      await this.activateCommentsView();
-      // Let the sidebar re-render from the new frontmatter, then focus the card.
-      window.setTimeout(() => this.focusThreadInSidebar(id), 120);
-      new Notice(`review-md: new thread ${id} (${describeAnchorShort(anchor)})`);
-    } catch (err) {
-      new Notice(`review-md: ${String(err)}`);
-    }
+  /** Hand a resolved click anchor to the comments sidebar's draft composer. */
+  private openDraftComposer(file: TFile, anchor: Record<string, unknown>): void {
+    const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_COMMENTS)[0]?.view;
+    if (view instanceof CommentsView) view.beginDraft(file, anchor);
   }
 
   /** Decide what a click anchors to: mermaid node, edge, image, or text/selection.
@@ -732,6 +774,16 @@ export default class ReviewMdPlugin extends Plugin {
     if (img) {
       const src = img.getAttribute("src") ?? "";
       return { type: "image", src };
+    }
+    // 2b) A link — internal `[[wikilink]]` (Obsidian stashes the target on
+    // `data-href`) or an external URL (`href`). After the image branch so an
+    // image wrapped in a link still anchors to the image, before the text
+    // fallback so link text doesn't collapse into its containing block.
+    const link = target.closest("a") as HTMLAnchorElement | null;
+    if (link) {
+      const href = (link.getAttribute("data-href") ?? link.getAttribute("href") ?? "").trim();
+      const quote = (link.textContent ?? "").trim();
+      if (href || quote) return { type: "link", href, quote: quote.slice(0, 200) };
     }
     // 3) Text in the CM6 editor surface: map the click to a source position via
     // posAtCoords (exact, no reliance on the reading-view line post-processor).
@@ -852,15 +904,17 @@ export default class ReviewMdPlugin extends Plugin {
     const ordered = [...data.threads].sort((a, b) => Number(a.resolved) - Number(b.resolved));
     if (!ordered.length) lines.push("_No comment threads yet._");
     for (const t of ordered) {
-      const a = t.anchor as { type?: string; node?: string; quote?: string; src?: string };
+      const a = t.anchor as { type?: string; node?: string; quote?: string; src?: string; href?: string };
       const where =
         a.type === "mermaidNode"
           ? `diagram node \`${a.node}\``
           : a.type === "image"
             ? `image \`${a.src}\``
-            : a.quote
-              ? `“${a.quote.replace(/\s+/g, " ").slice(0, 80)}”`
-              : a.type ?? "text";
+            : a.type === "link"
+              ? `link ${a.quote ? `“${a.quote.replace(/\s+/g, " ").slice(0, 60)}” ` : ""}→ \`${a.href ?? ""}\``
+              : a.quote
+                ? `“${a.quote.replace(/\s+/g, " ").slice(0, 80)}”`
+                : a.type ?? "text";
       lines.push(`## [${t.id}] ${where}${t.resolved ? " · resolved" : ""}`);
       if (!t.messages.length) lines.push("", "_(no messages yet)_");
       for (const m of t.messages) lines.push("", `**${m.author}** · ${m.ts}`, "", m.body);
@@ -891,8 +945,15 @@ export default class ReviewMdPlugin extends Plugin {
       .forEach((v) => v.previewMode?.rerender(true));
   }
 
-  /** Push a new, message-less thread onto the file's sidecar; return its id. */
-  async createThread(file: TFile, anchor: Record<string, unknown>): Promise<string> {
+  /** Push a new thread onto the file's sidecar and return its id. When
+   *  `firstMessage` is given it's written as the thread's first comment in the same
+   *  sidecar write (the draft composer's "Comment" path), so no message-less thread
+   *  is ever committed; without it the thread starts empty (legacy callers). */
+  async createThread(
+    file: TFile,
+    anchor: Record<string, unknown>,
+    firstMessage?: { author: string; body: string },
+  ): Promise<string> {
     const id = mkId();
     // Stamp the reviewed version before writing. bodyHash strips block-id markers
     // (see bodyHashFor), so the `^blockId` we may add below never counts as a
@@ -913,8 +974,11 @@ export default class ReviewMdPlugin extends Plugin {
     // never flips this thread's git stamp to WORKING_REV.
     const anchorHash = await this.anchorHashFor(file, anchor);
     if (anchorHash) rev.anchorHash = anchorHash;
+    const messages = firstMessage
+      ? [{ author: firstMessage.author, ts: new Date().toISOString(), body: firstMessage.body }]
+      : [];
     await this.mutateReview(file, (data) => {
-      data.threads.push({ id, anchor, resolved: false, messages: [], rev });
+      data.threads.push({ id, anchor, resolved: false, messages, rev });
     });
     return id;
   }
@@ -998,6 +1062,7 @@ export default class ReviewMdPlugin extends Plugin {
       quote?: string;
       blockId?: string;
       src?: string;
+      href?: string;
     };
     const norm = (s: string) => s.replace(/\s+/g, " ").trim();
     switch (a.type) {
@@ -1050,6 +1115,17 @@ export default class ReviewMdPlugin extends Plugin {
         const text = await this.app.vault.read(file);
         return text.includes(a.src) ? a.src : null;
       }
+      case "link": {
+        const href = a.href ?? "";
+        const q = a.quote ?? "";
+        if (!href && !q) return undefined;
+        // The link is "still there" as long as its target (href) — or, for a
+        // bare-text link, its display text — appears in the source. href+text
+        // together are the anchored identity, so a change to either is outdated.
+        const text = await this.app.vault.read(file);
+        const present = href ? text.includes(href) : norm(text).includes(norm(q));
+        return present ? norm(`${href} ${q}`) : null;
+      }
       default:
         return undefined;
     }
@@ -1089,12 +1165,12 @@ export default class ReviewMdPlugin extends Plugin {
     const abs = nodePath.join(basePath, file.path);
     const dir = nodePath.dirname(abs);
     // maxBuffer bumped so `git show` of a large file isn't truncated.
-    const run = (args: string[], trim = true): Promise<string | null> =>
+    const exec = (cwd: string, args: string[], trim = true): Promise<string | null> =>
       new Promise((res) => {
         try {
           cp.execFile(
             "git",
-            ["-C", dir, ...args],
+            ["-C", cwd, ...args],
             { timeout: 4000, maxBuffer: 16 * 1024 * 1024 },
             (err: unknown, out: string) => res(err ? null : trim ? String(out).trim() : String(out)),
           );
@@ -1102,8 +1178,17 @@ export default class ReviewMdPlugin extends Plugin {
           res(null);
         }
       });
-    const root = await run(["rev-parse", "--show-toplevel"]);
+    // Probe for the repo root from the file's own directory, then run every real
+    // command FROM that root. `rel` is repo-root-relative, and git resolves a
+    // pathspec relative to cwd — so running from a subfolder (e.g. docs/designs)
+    // made `-- docs/designs/design.md` match nothing and silently emptied the
+    // revision history for any file not at the vault root. Tree-ish forms
+    // (`HEAD:<rel>`, `<commit>:<rel>`) always resolve from the root, which masked
+    // the bug until a nested doc's `--follow` log came back empty. See
+    // docs/issues/git-pathspec-cwd.md.
+    const root = await exec(dir, ["rev-parse", "--show-toplevel"]);
     if (!root) return null;
+    const run = (args: string[], trim = true): Promise<string | null> => exec(root, args, trim);
     return { run, rel: nodePath.relative(root, abs) };
   }
 
@@ -1187,26 +1272,46 @@ export default class ReviewMdPlugin extends Plugin {
   }
 
   /**
-   * The reviewed version's body (frontmatter stripped) via
-   * `git show <commit>:<relpath>`, or null when there's no git stamp / retrieval
-   * fails. The sidebar falls back to the stored anchor quote in that case.
-   *
-   * A WORKING_REV thread was reviewed against the uncommitted working tree, which
-   * isn't in any commit. While it's still current (not outdated) the working tree
-   * *is* the reviewed body, so read the file; once it drifts that content is gone
-   * (it was never committed) → null, and the sidebar shows the stored quote.
+   * The file's body (frontmatter stripped) as of an arbitrary revision — a git
+   * commit sha, or WORKING_REV for the current working tree — following renames
+   * so an old path still resolves. null when there's no git access or the file
+   * didn't exist at that commit. Powers the card's version stepper, which browses
+   * the anchored content across the file's history; it takes a bare revision key
+   * and applies no thread-specific outdated check.
    */
-  async reviewedBodyFor(file: TFile, thread: ReviewThread): Promise<string | null> {
-    const commit = thread.rev?.git?.commit;
-    if (!commit) return null;
-    if (commit === WORKING_REV) {
-      if (await this.isThreadOutdated(file, thread)) return null;
-      return stripFrontmatter(await this.app.vault.read(file));
-    }
+  async bodyAtRevision(file: TFile, commit: string): Promise<string | null> {
+    if (commit === WORKING_REV) return stripFrontmatter(await this.app.vault.read(file));
     const ctx = await this.gitContext(file);
     if (!ctx) return null;
-    const out = await ctx.run(["show", `${commit}:${ctx.rel}`], false);
-    return out === null ? null : stripFrontmatter(out);
+    const direct = await ctx.run(["show", `${commit}:${ctx.rel}`], false);
+    if (direct !== null) return stripFrontmatter(direct);
+    // The file may have been renamed since `commit` (the flagship doc moved into
+    // docs/designs/), so `commit:<current-path>` doesn't exist. Resolve the file's
+    // historical path(s) via --follow and retry, so the reviewed body — and the
+    // diagram preview built from it — survives renames. Without this every stamp
+    // predating a rename silently falls back to the stored quote.
+    // See docs/issues/reviewed-body-across-renames.md.
+    for (const path of await this.historicalPaths(ctx)) {
+      if (path === ctx.rel) continue;
+      const out = await ctx.run(["show", `${commit}:${path}`], false);
+      if (out !== null) return stripFrontmatter(out);
+    }
+    return null;
+  }
+
+  /** Every path this file has had across its rename history (newest first),
+   *  deduplicated. Used to recover an old blob whose path differs from today's. */
+  private async historicalPaths(ctx: {
+    run: (args: string[], trim?: boolean) => Promise<string | null>;
+    rel: string;
+  }): Promise<string[]> {
+    const log = await ctx.run(["log", "--follow", "--name-only", "--format=", "--", ctx.rel], false);
+    if (!log) return [];
+    const paths: string[] = [];
+    for (const line of log.split("\n").map((s) => s.trim())) {
+      if (line && !paths.includes(line)) paths.push(line);
+    }
+    return paths;
   }
 
   /** Ask the sidebar to scroll to and focus a thread's card + reply box. */
@@ -1252,10 +1357,22 @@ export default class ReviewMdPlugin extends Plugin {
       to?: string;
       index?: number;
       blockId?: string;
+      href?: string;
     };
     let el: HTMLElement | null = null;
 
-    if (a.type === "image" && a.src) {
+    if (a.type === "link" && (a.href || a.quote)) {
+      // Match on the target first (internal links stash it on `data-href`,
+      // external on `href`), then fall back to the display text. Iterating the
+      // <a> set avoids attribute-selector escaping on arbitrary hrefs.
+      const links = Array.from(container.querySelectorAll("a")) as HTMLAnchorElement[];
+      el =
+        (a.href
+          ? links.find((l) => (l.getAttribute("data-href") ?? l.getAttribute("href")) === a.href)
+          : undefined) ??
+        (a.quote ? links.find((l) => (l.textContent ?? "").trim() === a.quote) : undefined) ??
+        null;
+    } else if (a.type === "image" && a.src) {
       el = container.querySelector(`img[src="${a.src}"], img[src$="${a.src}"]`) as HTMLElement | null;
     } else if (a.type === "mermaidNode" && a.node) {
       el = container.querySelector(`g.node[id*="-${a.node}-"], g.node[id$="-${a.node}"]`) as HTMLElement | null;
@@ -1373,6 +1490,22 @@ export default class ReviewMdPlugin extends Plugin {
     if (!ok) throw new Error(`message ${threadId}#${index} not found`);
   }
 
+  /** Remove a single message (by thread id + message index) from the sidecar,
+   *  leaving the thread and its other messages intact. Throws if it isn't found.
+   *  Deleting the sole message is the caller's concern — see the view, which routes
+   *  a last-message delete to deleteThread so no message-less thread is left behind. */
+  async deleteMessage(file: TFile, threadId: string, index: number): Promise<void> {
+    let ok = false;
+    await this.mutateReview(file, (data) => {
+      const t = data.threads.find((x) => x.id === threadId);
+      if (t && t.messages[index]) {
+        t.messages.splice(index, 1);
+        ok = true;
+      }
+    });
+    if (!ok) throw new Error(`message ${threadId}#${index} not found`);
+  }
+
   /** Remove a thread from the file's sidecar entirely. Returns true if one went.
    *  Also strips the thread's source block id when no surviving thread uses it. */
   async deleteThread(file: TFile, threadId: string): Promise<boolean> {
@@ -1467,8 +1600,9 @@ export default class ReviewMdPlugin extends Plugin {
     else new Notice("review-md: open the comments sidebar and select a thread first");
   }
 
-  /** POC-1: resolve + open the target file, jump to a thread's ^blockId, and self-report. */
-  private async handleUri(op: XcallbackOperation, params: Record<string, string>): Promise<void> {
+  /** Resolve + open the target file and, when a thread param is present, jump to
+   *  its `^blockId`. Backs the `open` x-callback action. */
+  private async handleUri(_op: XcallbackOperation, params: Record<string, string>): Promise<void> {
     const af = this.resolveFile(params.file);
 
     const leaf = this.app.workspace.getLeaf(false);
@@ -1477,60 +1611,8 @@ export default class ReviewMdPlugin extends Plugin {
     if (params.thread) {
       this.app.workspace.openLinkText(`${af.path}#^${params.thread}`, af.path, false);
     }
-
-    const report =
-      `# POC-1 report\n\n- **RESULT: PASS** — protocol handler fired and opened the file.\n` +
-      `- opened: \`${af.path}\`\n- thread param: \`${params.thread ?? "(none)"}\`\n` +
-      `- action: \`${op.action}\`\n- x-success: \`${params["x-success"] ?? "(none)"}\`\n` +
-      `- at: ${new Date().toISOString()}\n`;
-    await this.writeVaultFile("POC-1-report.md", report);
-    new Notice("review-md POC-1: opened " + af.path + " — see POC-1-report.md");
   }
 
-  /** POC-4: write POC4_THREADS threads to the active file's frontmatter, read back, verify. */
-  private async runPoc4(): Promise<void> {
-    const file = this.app.workspace.getActiveFile();
-    if (!file) { new Notice("POC-4: open a markdown file first"); return; }
-
-    const threads = Array.from({ length: POC4_THREADS }, (_, i) => makePoc4Thread(i));
-    const totalMessages = threads.reduce((n, t) => n + t.messages.length, 0);
-
-    const t0 = performance.now();
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
-      fm.review = { ...(fm.review ?? {}), uid: (fm.review?.uid as string) ?? mkId() + mkId(), threads };
-    });
-    const writeMs = performance.now() - t0;
-
-    // Read back through a no-op processFrontMatter (authoritative, not the cache).
-    let readBack: ReviewThread[] = [];
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
-      readBack = (fm.review?.threads as ReviewThread[]) ?? [];
-    });
-
-    const countOk = readBack.length === POC4_THREADS;
-    const sampleIn = threads.find((t) => t.messages.some((m) => m.body.includes("ū")));
-    const sampleOut = readBack.find((t) => t.id === sampleIn?.id);
-    const bodyOk =
-      !!sampleIn && !!sampleOut &&
-      sampleIn.messages.map((m) => m.body).join("|") === sampleOut.messages.map((m) => m.body).join("|");
-
-    const size = (await this.app.vault.read(file)).length;
-    const pass = countOk && bodyOk;
-
-    const report =
-      `# POC-4 report\n\n- **RESULT: ${pass ? "PASS" : "FAIL"}**\n` +
-      `- target file: \`${file.path}\`\n` +
-      `- threads written / read back: ${POC4_THREADS} / ${readBack.length} ${countOk ? "✓" : "✗"}\n` +
-      `- total messages: ${totalMessages}\n` +
-      `- unicode+newline body round-trip: ${bodyOk ? "OK ✓" : "DIVERGED ✗"}\n` +
-      `- processFrontMatter write time: ${writeMs.toFixed(1)} ms\n` +
-      `- resulting file size: ${size} bytes\n` +
-      `- at: ${new Date().toISOString()}\n\n` +
-      `> Also check by eye: does the Properties panel stay usable with ${POC4_THREADS} threads?\n` +
-      `> Record that observation in docs/pocs/poc-4-frontmatter.md.\n`;
-    await this.writeVaultFile("POC-4-report.md", report);
-    new Notice(`review-md POC-4: ${pass ? "PASS" : "FAIL"} — see POC-4-report.md`);
-  }
 
   /**
    * Does thread `t` apply to a diagram with this source? True when it's a
@@ -1742,7 +1824,6 @@ export default class ReviewMdPlugin extends Plugin {
       const pos = nodeShapeTopRight(g);
       badge.setAttribute("transform", `translate(${pos.x}, ${pos.y})`);
       (badge as unknown as HTMLElement).dataset.node = node;
-      badge.style.cursor = "pointer";
       const circle = document.createElementNS(ns, "circle");
       circle.setAttribute("r", "11");
       const text = document.createElementNS(ns, "text");
@@ -1800,7 +1881,6 @@ export default class ReviewMdPlugin extends Plugin {
       g.setAttribute("class", "review-md-edge-badge" + (allResolved ? " is-resolved" : ""));
       g.setAttribute("transform", `translate(${mid.x}, ${mid.y})`);
       (g as unknown as HTMLElement).dataset.edge = edgeKey;
-      g.style.cursor = "pointer";
       const circle = document.createElementNS(ns, "circle");
       circle.setAttribute("r", "11");
       const text = document.createElementNS(ns, "text");
@@ -1816,20 +1896,9 @@ export default class ReviewMdPlugin extends Plugin {
     }
   }
 
-  private async writeVaultFile(path: string, content: string): Promise<void> {
-    const existing = this.app.vault.getAbstractFileByPath(path);
-    if (existing instanceof TFile) await this.app.vault.modify(existing, content);
-    else await this.app.vault.create(path, content);
-  }
-
   /** Every ```mermaid fence's source in a file (fences stripped). */
   private async mermaidBlocksIn(file: TFile): Promise<string[]> {
-    const text = await this.app.vault.read(file);
-    const re = /^[ \t]*`{3,}\s*mermaid\s*\r?\n([\s\S]*?)\r?\n[ \t]*`{3,}\s*$/gm;
-    const blocks: string[] = [];
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) blocks.push(m[1]);
-    return blocks;
+    return mermaidBlocksFrom(await this.app.vault.read(file));
   }
 
   /**
@@ -1840,11 +1909,17 @@ export default class ReviewMdPlugin extends Plugin {
    * Returns null for non-mermaidNode anchors.
    */
   async mermaidNodePreviewSource(file: TFile, thread: ReviewThread): Promise<string | null> {
+    return this.nodePreviewFromBlocks(await this.mermaidBlocksIn(file), thread);
+  }
+
+  /** As `mermaidNodePreviewSource`, but from a supplied set of mermaid fence
+   *  bodies (e.g. a previous version pulled from git) rather than the live file. */
+  private nodePreviewFromBlocks(blocks: string[], thread: ReviewThread): string | null {
     const a = thread.anchor as { type?: string; node?: string; quote?: string };
     if (a?.type !== "mermaidNode" || !a.node) return null;
     const node = a.node;
     const nodeRe = new RegExp(`(^|[^\\w])${escapeRegExp(node)}([^\\w]|$)`, "m");
-    const src = (await this.mermaidBlocksIn(file)).find((b) => nodeRe.test(b));
+    const src = blocks.find((b) => nodeRe.test(b));
     let def: string | null = null;
     if (src) {
       // Capture the node's declared shape+label (the occurrence that carries one).
@@ -1882,9 +1957,14 @@ export default class ReviewMdPlugin extends Plugin {
    * Returns null for non-mermaidEdge anchors.
    */
   async mermaidEdgePreviewSource(file: TFile, thread: ReviewThread): Promise<string | null> {
+    return this.edgePreviewFromBlocks(await this.mermaidBlocksIn(file), thread);
+  }
+
+  /** As `mermaidEdgePreviewSource`, but from a supplied set of mermaid fence
+   *  bodies (e.g. a previous version pulled from git) rather than the live file. */
+  private edgePreviewFromBlocks(blocks: string[], thread: ReviewThread): string | null {
     const a = thread.anchor as { type?: string; from?: string; to?: string };
     if (a?.type !== "mermaidEdge" || !a.from || !a.to) return null;
-    const blocks = await this.mermaidBlocksIn(file);
     const shapes =
       "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
     const defOf = (node: string): string => {
@@ -1895,6 +1975,21 @@ export default class ReviewMdPlugin extends Plugin {
       return `${node}["${node}"]`;
     };
     return `flowchart LR\n  ${defOf(a.from)} -->|💬| ${defOf(a.to)}`;
+  }
+
+  /**
+   * Build a node/edge preview source from an already-fetched body — the version
+   * stepper's per-revision path, where the body comes from `bodyAtRevision`
+   * rather than the thread's own stamp. null for non-mermaid anchors or when the
+   * element isn't in that version's diagram.
+   */
+  mermaidPreviewSourceFromBody(body: string, thread: ReviewThread): string | null {
+    const type = (thread.anchor as { type?: string })?.type;
+    if (type !== "mermaidNode" && type !== "mermaidEdge") return null;
+    const blocks = mermaidBlocksFrom(body);
+    return type === "mermaidEdge"
+      ? this.edgePreviewFromBlocks(blocks, thread)
+      : this.nodePreviewFromBlocks(blocks, thread);
   }
 
   /** Render mermaid source to an SVG string, or null if mermaid/render fails. */
@@ -1975,6 +2070,7 @@ function describeAnchorShort(anchor: Record<string, unknown>): string {
   if (type === "mermaidNode") return `node ${anchor.node}`;
   if (type === "mermaidEdge") return `edge ${anchor.from}→${anchor.to}`;
   if (type === "image") return "image";
+  if (type === "link") return "link";
   return "text";
 }
 
@@ -1997,4 +2093,47 @@ function findBlockContaining(root: HTMLElement, quote: string): HTMLElement | nu
     }
   }
   return best;
+}
+
+/**
+ * The plugin's Settings tab (#6): reviewer identity + the mermaid-overlay toggle.
+ * Both preferences persist through the plugin's `saveData`/`saveSettings` path.
+ */
+class ReviewMdSettingTab extends PluginSettingTab {
+  private plugin: ReviewMdPlugin;
+
+  constructor(app: App, plugin: ReviewMdPlugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    new Setting(containerEl)
+      .setName("Reviewer name")
+      .setDesc('The name new comments and replies are posted under. Leave blank to post as "reviewer".')
+      .addText((text) =>
+        text
+          .setPlaceholder("Your name")
+          .setValue(this.plugin.settings.reviewerName)
+          .onChange(async (value) => {
+            this.plugin.settings.reviewerName = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Show mermaid comment badges")
+      .setDesc(
+        "Overlay comment nodes and edge badges on rendered mermaid diagrams. " +
+          "Off renders diagrams fully native (comments stay in the sidecar).",
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.showMermaidComments)
+          .onChange((value) => void this.plugin.setShowMermaidComments(value)),
+      );
+  }
 }

@@ -16,10 +16,11 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
   version number. Requested 2026-09-25 ("beta testing before official release").
   **Progress 2026-09-25:** (1) done — `0.1.0` released. (2) done — BRAT installs 0.1.0 in
   a clean vault and `make setup-verify` passes (see
-  [`docs/issues/setup-via-brat.md`](issues/setup-via-brat.md)). **Blocker for (3):** the
-  repo is **private**, so BRAT gets a 404 for anyone without access. Either make
-  `omars-lab/review-md` public or give each tester a GitHub token
-  (`setup-vault.mjs install --token-name`). That call is Omar's.
+  [`docs/issues/setup-via-brat.md`](issues/setup-via-brat.md)). The repo being private
+  was blocking (3): BRAT gets a 404 without access. **Cleared 2026-09-25:**
+  `omars-lab/review-md` is now public (Omar's call, after a clean full-history gitleaks
+  scan). The manifest and the 0.1.0 assets download without a login, so testers need no
+  token. Next: (3) recruit testers.
 
 ## Deferred
 

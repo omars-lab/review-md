@@ -129,6 +129,11 @@ a GitHub repo and keeps it updated — no cloning, no build.
 
 BRAT then pulls new versions automatically whenever a release is cut.
 
+From a clone, the same install runs from the shell: `make setup-check VAULT=/abs/vault`
+→ `make setup-install VAULT=/abs/vault` → `make setup-verify VAULT=<vault name>` (needs the
+vault open with Settings → General → Command line interface on; details in the
+[`setup-review-md`](.claude/skills/setup-review-md/SKILL.md) skill).
+
 ### Into your own vault, from source
 
 If you'd rather build it yourself and drop it straight into a vault:

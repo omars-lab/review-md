@@ -1,5 +1,5 @@
 # review-md — one target per check; local hooks call these same targets (no CI service).
-.PHONY: help install hooks build dev typecheck test secrets secrets-all precommit check api-docs api-check reanchor validate validate-fix install-vault version release release-check
+.PHONY: help install hooks build dev typecheck test secrets secrets-all precommit check api-docs api-check reanchor validate validate-fix install-vault version release release-check setup-check setup-install setup-verify
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -55,6 +55,15 @@ env-restore: ## Restore .env.keys from LastPass (requires `lpass login`)
 
 install-vault: build ## Copy the built plugin into a real vault: make install-vault VAULT=<path>
 	node scripts/install-plugin.mjs "$(VAULT)"
+
+setup-check: ## Is review-md installed via BRAT + current? (read-only): make setup-check VAULT=<abs path>
+	node scripts/setup-vault.mjs check --vault "$(VAULT)"
+
+setup-install: ## Install BRAT + review-md through BRAT (idempotent; vault open in Obsidian): make setup-install VAULT=<abs path>
+	node scripts/setup-vault.mjs install --vault "$(VAULT)" $(if $(TOKEN_NAME),--token-name "$(TOKEN_NAME)")
+
+setup-verify: ## Prove review-md works in the live app (PASS/FAIL): make setup-verify VAULT=<vault name>
+	node scripts/setup-vault.mjs verify --vault "$(VAULT)"
 
 version: ## Bump version in lock-step (manifest/package/versions): make version V=<x.y.z>
 	node scripts/version.mjs "$(V)"

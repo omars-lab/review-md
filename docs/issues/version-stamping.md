@@ -21,7 +21,7 @@ rev:
   bodyHash: ea936ad0d737        # sha256 of the whole document BODY (frontmatter stripped) — coarse fallback
   ts: 2026-09-20T03:08:23.565Z
   git:                          # present only when the file is in a git work tree
-    commit: 8dfd923             # last commit that TOUCHED the md (see pivot below)
+    commit: ec14c64             # last commit that TOUCHED the md (see pivot below)
     blob: 31f7fa6…             # committed blob (HEAD:<relpath>)
 ```
 
@@ -117,11 +117,11 @@ last commit that actually **changed that file**, not whatever HEAD happens to be
 HEAD moves on with every unrelated commit, so a stamp of `HEAD` would drift away
 from the content it named even though the reviewed bytes never changed.
 
-Evidence from the dogfood vault: `design.md` was last edited in `28ae788`, but by
-the time the sidebar rendered, HEAD had moved three commits on to `85930ea`
+Evidence from the dogfood vault: `design.md` was last edited in `50ba884`, but by
+the time the sidebar rendered, HEAD had moved three commits on to `fb70035`
 (mermaid restyle work that never touched `design.md`). Stamping `HEAD` would have
-labelled the thread `on 85930ea` — a commit where the reviewed file is byte-for-byte
-identical to `28ae788`. The stamp must read `on 28ae788`.
+labelled the thread `on fb70035` — a commit where the reviewed file is byte-for-byte
+identical to `50ba884`. The stamp must read `on 50ba884`.
 
 So `gitRevFor` resolves the commit with:
 

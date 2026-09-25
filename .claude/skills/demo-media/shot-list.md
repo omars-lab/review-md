@@ -39,10 +39,10 @@ eval --code '(()=>{const v=app.workspace.getLeavesOfType("review-md-comments")[0
 use this; it is written `NUDGE <id>` below.
 
 Live threads in `docs/designs/.design.comments.md`: `d1a2b3` (mermaidNode `CS`, committed
-v3 `28ae788`, outdated), `e4f5a6` (mermaidNode `MA`, committed v3 `28ae788`, resolved),
-`a7b8c9` (mermaidNode `Store`, committed v4 `b1237be`), `qklp1y` (mermaidEdge `URL → PH`,
-committed v5 `bd9dda7`). `design.md` has six commits of real history (v1 `42cdea2` … v6
-`38238a7`), so the version stepper walks a genuine ladder. Use these ids below.
+v3 `50ba884`, outdated), `e4f5a6` (mermaidNode `MA`, committed v3 `50ba884`, resolved),
+`a7b8c9` (mermaidNode `Store`, committed v4 `1551edf`), `qklp1y` (mermaidEdge `URL → PH`,
+committed v5 `3f82635`). `design.md` has six commits of real history (v1 `b87b326` … v6
+`3b03b61`), so the version stepper walks a genuine ladder. Use these ids below.
 
 ---
 
@@ -127,7 +127,7 @@ card's current preview visibly disagree — the drift the feature exists to surf
   move the cursor off the button first (`cliclick m:600,950`) so no "Older version"
   tooltip lands in the shot, then:
   `shot --out docs/media/version-stepper.png --selector '.review-md-thread[data-thread-id="d1a2b3"]' --pad 8 --settle 400`
-  (`d1a2b3`'s `CS` node reads "Comment store · frontmatter" at **v2 `8dfd923`** but
+  (`d1a2b3`'s `CS` node reads "Comment store · frontmatter" at **v2 `ec14c64`** but
   "… .name.comments.md sidecar" now — a clean before/after in one card, and the thread
   below is literally that frontmatter-vs-sidecar decision.)
 

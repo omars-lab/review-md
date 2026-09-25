@@ -78,7 +78,7 @@ reply to `qklp1y` through `plugin.appendReply` (the same sidecar write +
 
 ```
 taValue "draft in progress"  caret 5  active true  scrollTop 40  armed true
-sameCardEl true  previewOpen true (v4 (b1237be) content loaded)
+sameCardEl true  previewOpen true (v4 (1551edf) content loaded)
 focused d1a2b3  qklp1y messages 3 → 4, last body "surgical test 2"
 ```
 

@@ -30,7 +30,7 @@ Two independent gaps, both on the reviewed-version path:
    thread stamped to a commit *before* that rename, `<commit>:docs/designs/design.md`
    doesn't exist → `git show` fails → `null` → the sidebar falls back to the stored
    quote. Since all the dogfood mermaid threads are stamped to pre-rename commits
-   (`28ae788`, `b1237be`, `bd9dda7`), the git-recovery feature was effectively dead
+   (`50ba884`, `1551edf`, `3f82635`), the git-recovery feature was effectively dead
    for the one doc it's demoed on. This is the same rename that broke `v`-numbering
    (see [docs-vault-and-follow-reverse.md](docs-vault-and-follow-reverse.md)).
 

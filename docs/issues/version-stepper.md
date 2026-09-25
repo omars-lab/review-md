@@ -7,7 +7,7 @@ of each comment card) is gone. In its place, the card's rev-stamp line is now an
 inline **version stepper**:
 
 ```
-‹  v6 (38238a7)  ›
+‹  v6 (3b03b61)  ›
 ```
 
 - The centred label names the version (`revLabelFor`): `Working copy`, `v7 (b24cd88)`,

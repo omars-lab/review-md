@@ -67,11 +67,11 @@ written had it been authored at a real past revision — real 7-char commit, rea
 
 | thread | commit | v | staleness |
 |---|---|---|---|
-| `d1a2b3`, `e4f5a6` | `28ae788` | v3 | outdated (body changed since; no `anchorHash` → coarse `bodyHash` fallback) |
-| `a7b8c9` | `b1237be` | v4 | outdated |
-| `qklp1y` | `bd9dda7` | v5 | current (`bd9dda7` body == HEAD; the move was a pure rename) |
+| `d1a2b3`, `e4f5a6` | `50ba884` | v3 | outdated (body changed since; no `anchorHash` → coarse `bodyHash` fallback) |
+| `a7b8c9` | `1551edf` | v4 | outdated |
+| `qklp1y` | `3f82635` | v5 | current (`3f82635` body == HEAD; the move was a pure rename) |
 
-Dropdown now: **All, v5 (bd9dda7), v4 (b1237be), v3 (28ae788)**. The mixed
+Dropdown now: **All, v5 (3f82635), v4 (1551edf), v3 (50ba884)**. The mixed
 current/outdated result is faithful: an `anchorHash`-less thread legitimately gets the
 coarse whole-body staleness signal (see `version-stamping.md`).
 

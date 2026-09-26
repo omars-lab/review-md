@@ -13,11 +13,12 @@
  *
  * Preconditions: `gh` authenticated (gh auth status), clean working tree.
  */
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, rmSync, mkdirSync, copyFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { resolve, join } from "node:path";
+import { resolve, join, basename } from "node:path";
 
 const repo = resolve(import.meta.dirname, "..");
+const CLI_OUT = join(repo, "plugins/review-md/bin/reviews.mjs");
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const notesIdx = args.indexOf("--notes");
@@ -42,8 +43,12 @@ if (!versions[version])
   die(`versions.json has no entry for ${version} — run \`make version V=${version}\``);
 
 // --- 2. Built artifacts present (the release assets). ---
-const assets = ["main.js", "manifest.json", "styles.css"];
-for (const f of assets) if (!existsSync(join(repo, f))) die(`missing ${f} — run \`npm run build\` first`);
+// main.js + manifest.json + styles.css are what BRAT and the store download, one by
+// one. The zip holds the same three in a review-md/ folder, for a manual install:
+// unzip into <vault>/.obsidian/plugins/. reviews.mjs is the standalone CLI.
+const pluginFiles = ["main.js", "manifest.json", "styles.css"];
+for (const f of pluginFiles) if (!existsSync(join(repo, f))) die(`missing ${f} — run \`npm run build\` first`);
+if (!existsSync(CLI_OUT)) die(`missing ${CLI_OUT} — run \`make cli\` first`);
 
 // --- 3. Clean tree + tag/release not already taken. ---
 if (git(["status", "--porcelain"])) die("working tree is dirty — commit or stash before releasing");
@@ -58,19 +63,54 @@ try {
 }
 if (releaseExists) die(`a GitHub release tagged ${version} already exists`);
 
+// --- 4. The Claude Code plugin ships from the same commit: its version must match. ---
+const claudePlugin = readJson("plugins/review-md/.claude-plugin/plugin.json");
+if (claudePlugin.version !== version)
+  die(`plugins/review-md/.claude-plugin/plugin.json version (${claudePlugin.version}) != ${version} — run \`make version V=${version}\``);
+try {
+  execFileSync("claude", ["plugin", "validate", repo], { stdio: "ignore" });
+} catch (err) {
+  if (err.code !== "ENOENT") die("`claude plugin validate .` failed — run it to see why");
+  console.log("  (claude not on PATH — skipped plugin validate)");
+}
+
+// --- 5. Stage the zip + CLI in dist/ (gitignored). ---
+const dist = join(repo, "dist");
+const zipName = `review-md-${version}.zip`;
+rmSync(dist, { recursive: true, force: true });
+mkdirSync(join(dist, "review-md"), { recursive: true });
+for (const f of pluginFiles) copyFileSync(join(repo, f), join(dist, "review-md", f));
+execFileSync("zip", ["-qr", zipName, "review-md"], { cwd: dist });
+copyFileSync(CLI_OUT, join(dist, "reviews.mjs"));
+const assets = [...pluginFiles, join(dist, zipName), join(dist, "reviews.mjs")];
+
 const head = git(["rev-parse", "--short", "HEAD"]);
 console.log(`release: review-md ${version} @ ${head}`);
-console.log(`  assets: ${assets.join(", ")}`);
+console.log(`  assets: ${assets.map((a) => basename(a)).join(", ")}`);
+console.log(`  claude plugin: review-md ${claudePlugin.version} (installs from main)`);
 
 if (dryRun) {
   console.log("release: --dry-run OK — everything is consistent and ready to publish");
   process.exit(0);
 }
 
-// --- 4. Publish. gh creates the tag at HEAD; title == tag == manifest version. ---
+// --- 6. Publish. gh creates the tag at HEAD; title == tag == manifest version. ---
 const body =
   (notes ? notes + "\n\n" : "") +
-  `Install with [BRAT](https://github.com/TfTHacker/obsidian42-brat): add \`omars-lab/review-md\`.\n`;
+  [
+    "**Obsidian plugin**",
+    `- [BRAT](https://github.com/TfTHacker/obsidian42-brat): add \`omars-lab/review-md\` (auto-updates).`,
+    `- Or by hand: unzip \`${zipName}\` into \`<vault>/.obsidian/plugins/\`, then enable Review MD.`,
+    "",
+    "**Claude Code plugin** (the `reviews` skill + CLI)",
+    "```",
+    "/plugin marketplace add omars-lab/review-md",
+    "/plugin install review-md@review-md",
+    "```",
+    "",
+    "**CLI only**: `reviews.mjs` needs just Node 18+ — `node reviews.mjs help`.",
+    "",
+  ].join("\n");
 execFileSync(
   "gh",
   ["release", "create", version, ...assets, "-R", "omars-lab/review-md", "--title", version, "--notes", body],

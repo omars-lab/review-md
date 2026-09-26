@@ -1,5 +1,5 @@
 # --- Node / build ---
-node_modules/
+node_modules
 dist/
 # esbuild output (the built plugin bundle; built from src/)
 main.js

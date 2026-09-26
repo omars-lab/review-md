@@ -26,6 +26,16 @@ repos:
         pass_filenames: false
         files: '^(src/protocol/xcallback\.schema\.json|scripts/gen-xcallback-api\.mjs|docs/api/)'
 
+      # The Claude plugin ships a bundled copy of the reviews CLI (committed, since a
+      # plugin installs straight from git). Fail when it lags its sources. Same as
+      # `make cli-check`.
+      - id: cli-bundle
+        name: bundled reviews CLI in sync with its sources
+        entry: node scripts/build-cli.mjs --check
+        language: system
+        pass_filenames: false
+        files: '^(scripts/(reviews|build-cli)\.mjs|src/pure\.ts|plugins/review-md/bin/)'
+
       # Schema-check any comment sidecar being committed: required fields, known
       # anchor types, and — the common trap — hash fields YAML would parse as
       # numbers unless quoted. pass_filenames so it only re-checks staged sidecars.

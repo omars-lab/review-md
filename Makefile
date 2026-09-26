@@ -1,5 +1,5 @@
 # review-md — one target per check; local hooks call these same targets (no CI service).
-.PHONY: help install hooks build dev typecheck test secrets secrets-all precommit check api-docs api-check reanchor validate validate-fix install-vault version release release-check setup-check setup-install setup-verify
+.PHONY: help install hooks build dev typecheck test secrets secrets-all precommit check api-docs api-check reanchor validate validate-fix install-vault cli cli-check version release release-check setup-check setup-install setup-verify
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -36,6 +36,12 @@ api-docs: ## Regenerate docs/api/* from the x-callback schema
 api-check: ## Fail if docs/api/* are stale vs the schema (what the pre-commit hook runs)
 	node scripts/gen-xcallback-api.mjs --check
 
+cli: ## Bundle the reviews CLI into plugins/review-md/bin/reviews.mjs (commit the result)
+	node scripts/build-cli.mjs
+
+cli-check: ## Fail if the bundled reviews CLI is stale vs its sources (what the pre-commit hook runs)
+	node scripts/build-cli.mjs --check
+
 reanchor: ## Re-anchor working-copy comment threads to their commit (what the post-commit hook runs)
 	node scripts/reanchor-comments.mjs
 
@@ -68,10 +74,10 @@ setup-verify: ## Prove review-md works in the live app (PASS/FAIL): make setup-v
 version: ## Bump version in lock-step (manifest/package/versions): make version V=<x.y.z>
 	node scripts/version.mjs "$(V)"
 
-release: build ## Cut a GitHub release BRAT installs from (manual, no Actions)
+release: build cli-check ## Cut a GitHub release BRAT installs from (manual, no Actions)
 	node scripts/release.mjs
 
-release-check: build ## Validate release readiness without publishing
+release-check: build cli-check ## Validate release readiness without publishing
 	node scripts/release.mjs --dry-run
 
-check: typecheck test api-check validate secrets-all ## Run the full local gate
+check: typecheck test api-check cli-check validate secrets-all ## Run the full local gate

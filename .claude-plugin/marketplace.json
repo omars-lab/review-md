@@ -1,0 +1,15 @@
+{
+  "name": "review-md",
+  "description": "Claude Code plugin for review-md: read and answer Markdown review threads from the terminal.",
+  "owner": {
+    "name": "omars-lab",
+    "url": "https://github.com/omars-lab"
+  },
+  "plugins": [
+    {
+      "name": "review-md",
+      "source": "./plugins/review-md",
+      "description": "Work the review comments left on Markdown docs with the review-md Obsidian plugin: find open threads, act on them, reply."
+    }
+  ]
+}

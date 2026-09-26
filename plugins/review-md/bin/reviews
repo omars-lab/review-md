@@ -1,0 +1,5 @@
+#!/bin/sh
+# `reviews` on PATH while the Claude Code plugin is enabled. The CLI itself is the
+# bundled reviews.mjs next to this file (built by scripts/build-cli.mjs); an
+# extensionless file can't be an ES module on every Node, hence this wrapper.
+exec node "$(dirname "$0")/reviews.mjs" "$@"

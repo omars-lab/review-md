@@ -203,10 +203,13 @@ export function anchorForTarget(text: string, target: CommentTarget): Record<str
     const at = start;
     start = -1;
     block.length = 0;
-    if (!body.includes(q)) return null;
+    // Case-insensitive match; the quote keeps the doc's own spelling, like a
+    // reviewer selecting those words.
+    const hit = body.toLowerCase().indexOf(q.toLowerCase());
+    if (hit < 0) return null;
     const heading = body.match(/^#{1,6}\s+(.*)$/);
     if (heading && lines[at].trim().startsWith("#")) return { type: "header", quote: norm(heading[1]).slice(0, 200), line: at };
-    return { type: "text", quote: q.slice(0, 200), line: at };
+    return { type: "text", quote: body.slice(hit, hit + q.length).slice(0, 200), line: at };
   };
   for (; i <= lines.length; i++) {
     const l = lines[i];

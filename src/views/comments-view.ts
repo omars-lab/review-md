@@ -241,7 +241,7 @@ export class CommentsView extends ItemView {
     // align again once it is.
     const align = () => {
       const header = this.contentEl.querySelector<HTMLElement>(".review-md-header");
-      const gap = 8;
+      const gap = 12;
       const offset =
         card.getBoundingClientRect().top -
         this.contentEl.getBoundingClientRect().top -

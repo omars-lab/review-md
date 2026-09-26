@@ -243,6 +243,7 @@ export default class ReviewMdPlugin extends Plugin {
         try {
           this.validateParams(op, params);
           if (op.id === "reply") await this.handleReply(params);
+          else if (op.id === "resolve") await this.handleResolve(params);
           else if (op.id === "export") await this.handleExport(params);
           else await this.handleUri(op, params);
           if (params["x-success"]) window.open(String(params["x-success"]));
@@ -1651,6 +1652,17 @@ export default class ReviewMdPlugin extends Plugin {
     await leaf.openFile(file);
     this.app.workspace.openLinkText(`${file.path}#^${threadId}`, file.path, false);
     new Notice(`review-md: replied to ${threadId} in ${file.path}`);
+  }
+
+  /** `resolve` action: mark a thread resolved, or open again with `state=open`. */
+  private async handleResolve(params: Record<string, string>): Promise<void> {
+    const file = this.resolveFile(params.file);
+    const resolved = (params.state || "resolved") === "resolved";
+    if (!(await this.readThreads(file)).some((t) => t.id === params.thread)) {
+      throw new Error(`thread not found: ${params.thread}`);
+    }
+    await this.setThreadResolved(file, params.thread, resolved);
+    new Notice(`review-md: ${resolved ? "resolved" : "reopened"} ${params.thread} in ${file.path}`);
   }
 
   /**

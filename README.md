@@ -277,6 +277,8 @@ reviews list docs --since 1d                   # threads with a message in the l
 reviews find "frontmatter" docs                # threads mentioning some words
 reviews show docs/designs/design.md d1a2b3     # one thread in full
 reviews reply docs/designs/design.md d1a2b3 "Fixed in abc123." --author claude
+reviews reply docs/designs/design.md d1a2b3 "Fixed in abc123." --resolve   # answer and close
+reviews resolve docs/designs/design.md d1a2b3 [--reopen]
 ```
 
 Add `--json` to `list`/`find`/`show`/`stats` for structured output. The data format and

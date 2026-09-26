@@ -38,29 +38,27 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
   - The AI digest opens with a lead-in, and shows today's text for outdated threads.
   - README Quick start.
 
-  Still open, by value for the effort:
-  1. **A mark on commented passages in the doc** (M). Only diagrams show that a comment
-     exists; a commented paragraph or link looks untouched. Add a subtle underline or a
-     margin dot that opens the thread.
-  2. **Collapse each card's reply box until the card is focused** (S–M). Today about
-     1.5 cards fit on screen.
-  3. **Anchor-type chips say `text` / `node`** (S). Plain words ("passage", "diagram box")
-     in the sidebar only; `anchorTypeLabel` also feeds the CLI and search, so map it in
-     the view.
-  4. **The CLI's staleness is whole-doc** (agent item 2 below). Until it's fixed, the
+  Shipped in `feat/beta-polish-2` (2026-09-26):
+  - Commented passages carry an amber margin bar and a comment button that opens the
+    thread, in reading view and Live Preview.
+  - A card's reply box stays hidden until the card is focused or has a draft.
+  - Chips say "passage" / "heading" / "diagram box" / "arrow" (sidebar only; the CLI and
+    search keep the type names).
+
+  Still open:
+  1. **The CLI's staleness is whole-doc** (agent item 2 below). Until it's fixed, the
      CLI digest can't show "now reads" the way the plugin's does.
 
 - **More for agents: endpoints to wrap in the `reviews` CLI** — ranked by value for the
   effort (brainstormed 2026-09-25, after the export URL + CLI shipped; gaps 1–2 came out of
   the first dogfood run, [`.claude/skills/reviews/notes.md`](../.claude/skills/reviews/notes.md)).
-  1. **Resolve / reopen** — `obsidian://review-md-resolve?file&thread[&state=reopen]` +
-     `reviews resolve`. Today an agent can answer but not close, so answered threads pile
-     up as open. Small: one handler, one schema op.
+  1. ~~**Resolve / reopen**~~ — **DONE 2026-09-26.** `obsidian://review-md-resolve?file&thread[&state=open]`,
+     `reviews resolve <doc> <id> [--reopen]`, and `reviews reply … --resolve`.
   2. **Per-passage staleness in the CLI** — move the plugin's `isThreadOutdated` logic
      (hash just the anchored block / node / image when it can) into `src/pure.ts` and use it
      in `reviews`. Today every thread reads OUTDATED after any edit anywhere in the doc.
-  3. **`--since <time>`** on list/find — "what's new since I last looked", for a polling
-     agent. Tiny: filter on the latest message stamp (`latestTs` already exists).
+  3. ~~**`--since <time>`**~~ — **DONE 2026-09-26.** On list/find; takes an age (`2h`,
+     `3d`) or a date.
   4. **`reviews diff <doc> <id>`** — the anchored passage as the reviewer saw it
      (`git show <rev.git.commit>:<path>`) next to today's, so an agent sees whether the
      point was already addressed. Small, read-only.

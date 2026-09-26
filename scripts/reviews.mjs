@@ -132,7 +132,7 @@ function fail(code, msg) {
 // ---- Argument parsing: positionals + a fixed set of flags per command.
 
 const VALUE_FLAGS = new Set(["text", "vault", "author", "waiting", "since"]);
-const BOOL_FLAGS = new Set(["open", "unresolved", "json", "dry-run", "help"]);
+const BOOL_FLAGS = new Set(["open", "unresolved", "json", "dry-run", "help", "resolve", "reopen"]);
 
 function parseArgs(argv) {
   const flags = {};
@@ -302,16 +302,18 @@ Example:
   },
 
   reply: {
-    usage: "reviews reply <doc.md> <thread-id> <message> [--author <name>] [--vault <name>] [--dry-run]",
+    usage: "reviews reply <doc.md> <thread-id> <message> [--author <name>] [--resolve] [--vault <name>] [--dry-run]",
     summary: "Reply to a thread (through Obsidian, which stays the only writer)",
     help: `Sends obsidian://review-md-reply, so the reply is written by the plugin exactly as
 if typed in the panel. The author defaults to "claude". Checks the thread exists
 first, then waits (up to 10s) until the reply shows up in the sidecar — exit 0 means
 it landed, exit 4 means it didn't (Obsidian closed, vault not open, a dialog in the
-way). --dry-run prints the URL and sends nothing.
+way). --resolve also resolves the thread once the reply is in. --dry-run prints the
+URL and sends nothing.
 
-Example:
-  reviews reply docs/designs/design.md d1a2b3 "Moved to the sidecar in 3f82635." --author claude`,
+Examples:
+  reviews reply docs/designs/design.md d1a2b3 "Moved to the sidecar in 3f82635." --author claude
+  reviews reply docs/designs/design.md d1a2b3 "Fixed in 3f82635." --resolve`,
     run({ flags, pos }) {
       const [doc, id, ...words] = pos;
       const body = words.join(" ");
@@ -324,7 +326,10 @@ Example:
         url("review-md-reply", { vault, file: vaultPath(doc), thread: id, author: flags.author ?? "claude", body }),
         flags,
       );
-      if (flags["dry-run"]) return;
+      if (flags["dry-run"]) {
+        if (flags.resolve) setResolved(doc, id, true, vault, flags);
+        return;
+      }
       // The URL is fire-and-forget; the sidecar is the truth. Wait for the new message.
       const landed = () => {
         const t = readDoc(doc).threads.find((x) => x.id === id);
@@ -334,6 +339,27 @@ Example:
         fail(4, `reply to ${id} didn't land in 10s — is Obsidian running with vault "${vault}" open, and no dialog in the way?`);
       }
       process.stdout.write(`reply landed on ${id}\n`);
+      if (flags.resolve) setResolved(doc, id, true, vault, flags);
+    },
+  },
+
+  resolve: {
+    usage: "reviews resolve <doc.md> <thread-id> [--reopen] [--vault <name>] [--dry-run]",
+    summary: "Resolve a thread, or reopen it (through Obsidian)",
+    help: `Sends obsidian://review-md-resolve and waits (up to 10s) until the sidecar shows the
+new state — exit 0 means it's stored, exit 4 means it didn't land. Resolve a thread once
+it's answered or fixed, so it stops showing as open. --reopen opens it again.
+To answer and close in one go: reviews reply <doc> <id> "<message>" --resolve.
+
+Examples:
+  reviews resolve docs/designs/design.md d1a2b3
+  reviews resolve docs/designs/design.md d1a2b3 --reopen`,
+    run({ flags, pos }) {
+      const [doc, id] = pos;
+      if (!doc || !id) fail(2, `usage: ${this.usage}`);
+      const [f] = load(doc, { includeResolved: true });
+      if (!f.threads.some((t) => t.id === id)) fail(3, `no thread ${id} on ${doc} (try: reviews list ${doc})`);
+      setResolved(doc, id, !flags.reopen, vaultName(doc, flags), flags);
     },
   },
 
@@ -361,6 +387,17 @@ function waitFor(check, ms) {
     }
   }
   return false;
+}
+
+/** Send review-md-resolve and wait until the sidecar shows the new state. */
+function setResolved(doc, id, resolved, vault, flags) {
+  openUrl(url("review-md-resolve", { vault, file: vaultPath(doc), thread: id, state: resolved ? "resolved" : "open" }), flags);
+  if (flags["dry-run"]) return;
+  const landed = () => readDoc(doc).threads.find((x) => x.id === id)?.resolved === resolved;
+  if (!waitFor(landed, 10_000)) {
+    fail(4, `${id} didn't change in 10s — is Obsidian running with vault "${vault}" open, and no dialog in the way?`);
+  }
+  process.stdout.write(`${id} ${resolved ? "resolved" : "reopened"}\n`);
 }
 
 /** A doc's path inside its vault, for obsidian:// URLs. */

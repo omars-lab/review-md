@@ -47,6 +47,25 @@ Example:
 obsidian://review-md-reply?vault=docs&file=designs%2Fdesign.md&thread=d1a2b3&body=agreed%20%E2%80%94%20let's%20keep%20it%20in%20frontmatter
 ```
 
+## `obsidian://review-md-resolve` — Resolve or reopen a thread
+
+Mark a comment thread resolved (the default) or open again. Use it after answering a thread, so answered threads don't pile up as open.
+
+| Param | Required | Type | Default / Enum | Description |
+|---|---|---|---|---|
+| `vault` | yes — URL only | string | — | Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). |
+| `file` | yes | string | — | Vault-relative path to the markdown file that holds the thread. |
+| `thread` | yes | string | — | Id of the thread to resolve or reopen. |
+| `state` | no | string | enum: `resolved`, `open` | `resolved` closes the thread; `open` reopens it. |
+| `x-success` | no | string | — | URL opened once the thread's state is stored (x-callback-url). |
+| `x-error` | no | string | — | URL opened when the operation fails (x-callback-url). |
+
+Example:
+
+```
+obsidian://review-md-resolve?vault=docs&file=designs%2Fdesign.md&thread=d1a2b3
+```
+
 ## `obsidian://review-md-export` — Copy threads to the clipboard for an AI tool
 
 Gather comment threads — from one file, or every file in the vault — into a Markdown digest (anchor, state, messages, and an open/reply link per thread) and copy it to the clipboard, ready to paste into any AI chat. Open threads only unless `resolved=include`. The same digest `npm run reviews -- list` prints from a clone.

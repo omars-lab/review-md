@@ -49,6 +49,14 @@ interface Transient {
   scrollTop: number;
 }
 
+/** The card chip's words. `anchorTypeLabel` stays short for the CLI, search and
+ *  the chip's `data-type` styling; people see these. */
+const PLAIN_TYPE: Record<string, string> = { text: "passage", header: "heading", node: "diagram box", edge: "arrow" };
+function plainTypeLabel(anchor: Record<string, unknown>): string {
+  const t = anchorTypeLabel(anchor);
+  return PLAIN_TYPE[t] ?? t;
+}
+
 /** The amber "outdated" badge on a card's version row, with a tooltip that says
  *  what it means and what to do about it. */
 function renderOutdatedBadge(parent: HTMLElement): void {
@@ -226,13 +234,23 @@ export class CommentsView extends ItemView {
     const card = this.contentEl.querySelector<HTMLElement>(`[data-thread-id="${threadId}"]`);
     if (!card) return;
     this.setFocused(threadId);
-    // The header is sticky and wraps (chips + search + sort), so its height varies;
-    // publish it as a CSS variable the card's scroll-margin-top reads, then align
-    // the card's top just under it. "start" (not "center") so a tall card — a
-    // mermaid preview plus messages — never lands with its head under the header.
-    const header = this.contentEl.querySelector<HTMLElement>(".review-md-header");
-    this.contentEl.style.setProperty("--review-md-header-h", `${header?.offsetHeight ?? 0}px`);
-    card.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Put the card's top just under the sticky header (it wraps, so its height
+    // varies) — the top, not the centre, so a tall card never lands with its head
+    // hidden. Measured and scrolled by hand: scrollIntoView ignored the header, and
+    // when this click just opened the sidebar the layout isn't settled yet, so
+    // align again once it is.
+    const align = () => {
+      const header = this.contentEl.querySelector<HTMLElement>(".review-md-header");
+      const gap = 8;
+      const offset =
+        card.getBoundingClientRect().top -
+        this.contentEl.getBoundingClientRect().top -
+        (header?.offsetHeight ?? 0) -
+        gap;
+      if (Math.abs(offset) > 2) this.contentEl.scrollTo({ top: this.contentEl.scrollTop + offset, behavior: "smooth" });
+    };
+    window.requestAnimationFrame(() => window.requestAnimationFrame(align));
+    window.setTimeout(align, 400);
     card.addClass("review-md-flash");
     window.setTimeout(() => card.removeClass("review-md-flash"), 1600);
     card.querySelector<HTMLTextAreaElement>(".review-md-reply-input")?.focus();
@@ -713,7 +731,7 @@ export class CommentsView extends ItemView {
     // description stays as the tooltip.
     top.createEl("span", {
       cls: "review-md-type-badge",
-      text: anchorTypeLabel(thread.anchor),
+      text: plainTypeLabel(thread.anchor),
       attr: { "data-type": anchorTypeLabel(thread.anchor), title: describeAnchor(thread.anchor) },
     });
     const resolvedTag = top.createEl("span", { cls: "review-md-resolved-tag", text: "resolved" });
@@ -955,7 +973,7 @@ export class CommentsView extends ItemView {
     const top = card.createDiv({ cls: "review-md-thread-top" });
     top.createEl("span", {
       cls: "review-md-type-badge",
-      text: anchorTypeLabel(anchor),
+      text: plainTypeLabel(anchor),
       attr: { "data-type": anchorTypeLabel(anchor), title: describeAnchor(anchor) },
     });
     top.createEl("span", { cls: "review-md-draft-tag", text: "new comment" });

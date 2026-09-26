@@ -224,8 +224,6 @@ body.theme-dark {
   padding: var(--size-4-2);
   margin: var(--size-4-3) 0;
   background: var(--background-secondary);
-  /* Keep a focused card clear of the sticky header (height set by focusThread). */
-  scroll-margin-top: calc(var(--review-md-header-h, 0px) + var(--size-4-3) + var(--size-4-2));
 }
 .review-md-thread.is-resolved {
   opacity: 0.6;
@@ -374,8 +372,51 @@ body.theme-dark {
   margin: var(--size-4-1) 0;
 }
 
+/* A commented passage in the doc: an amber bar on its left, and in reading
+   view a speech-bubble button on its right that opens the thread. */
+.review-md-commented {
+  position: relative;
+}
+.review-md-commented::before,
+.review-md-commented-line::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--review-md-amber-line);
+}
+/* Live Preview: the same bar, in the gutter so it clears the first letter. */
+.review-md-commented-line {
+  position: relative;
+}
+.review-md-commented-line::before {
+  left: -8px;
+}
+.review-md-passage-mark.clickable-icon {
+  position: absolute;
+  right: -28px;
+  top: 0;
+  padding: 2px;
+  gap: 2px;
+  font-size: var(--font-ui-smaller);
+  color: var(--review-md-amber-line);
+}
+.review-md-passage-mark .svg-icon {
+  width: 14px;
+  height: 14px;
+}
+
 .review-md-reply {
   margin-top: var(--size-4-2);
+}
+/* Only the selected card shows its reply box, so more cards fit on screen.
+   Clicking a card selects it; a half-typed reply keeps its box open. */
+.review-md-thread:not(.is-focused):not(:focus-within)
+  .review-md-reply:has(.review-md-reply-input:placeholder-shown) {
+  display: none;
 }
 .review-md-reply-input {
   width: 100%;

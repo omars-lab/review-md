@@ -32,11 +32,14 @@ rather than guessing flags.
    spoke last. Add `--json` to work through them one by one; each file's `file` is the
    path on disk to pass back to `show`/`reply`.
    Looking for one topic: `reviews find "<words>" <folder> --open`.
+   Checking back later: add `--since 2h` (or a date) to see only threads with new
+   messages since then.
 3. **Act on each thread.** Read the anchor (what the thread points at — a passage, a
    diagram node or edge, an image, a link) and the messages. Then change the doc, or
-   answer the question. **OUTDATED** means the doc changed since the thread was
-   written — read the current text before answering; the point may already be handled.
-   `reviewed against: <commit>` shows what the reviewer saw: `git show <commit>:<path>`.
+   answer the question. **OUTDATED** means the commented passage changed since the
+   thread was written (`now reads:` shows it today) — the point may already be handled.
+   `reviews diff <doc.md> <id>` prints the passage as the reviewer saw it next to
+   today's (`changed` / `unchanged` / `gone`).
 4. **Reply on the thread** with what you did, naming the commit if you changed the doc:
    `reviews reply <doc.md> <id> "Reworded in abc123 — …" --author claude`.
    It waits until the reply is in the comments file: `reply landed on <id>` (exit 0)
@@ -44,6 +47,11 @@ rather than guessing flags.
    open, or a dialog is in the way. Fix that and send again. `--dry-run` prints the URL
    without sending it. Replies are visible to everyone who reads the doc — keep them
    factual.
+5. **Close what's done.** When you made the change the thread asked for, add
+   `--resolve` to the reply so it stops showing as open. Leave it open when you
+   answered a question, pushed back, or aren't sure it's settled — the reviewer
+   decides then. `reviews resolve <doc.md> <id>` resolves on its own; `--reopen`
+   undoes it.
 
 Exit codes: 0 OK · 2 bad usage · 3 no comments file / no such thread · 4 Obsidian
 didn't take it.
@@ -61,6 +69,5 @@ didn't take it.
 
 - Don't edit the `.comments.md` files by hand — reply through `reviews` so the plugin
   writes them.
-- Don't resolve threads for the reviewer; there's no resolve command yet. Say it's done
-  in the reply and let them close it.
+- Don't resolve a thread you only answered or disagreed with (see step 5).
 - Don't reply to a thread you haven't acted on just to clear the queue.

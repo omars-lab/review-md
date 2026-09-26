@@ -26,6 +26,8 @@ import {
   blockTextFor,
   sha256Short,
   bodyHash,
+  anchorContentIn,
+  anchorChanged,
   ordinalsFromLog,
   revKeyOf,
   revLabelFor,
@@ -38,6 +40,8 @@ import {
   sortThreads,
   latestTs,
   anchorLineIn,
+  commentedLines,
+  sinceCutoff,
   startsFolded,
   FOLD_OVER,
   anchorWhere,
@@ -452,6 +456,32 @@ test("anchorLineIn image and link: the source line, image by file name when src 
   assert.equal(anchorLineIn(BODY, { type: "mystery" }), null);
 });
 
+test("sinceCutoff: ages count back from now, dates parse, junk is null", () => {
+  const now = Date.parse("2026-09-26T12:00:00Z");
+  assert.equal(sinceCutoff("30m", now), now - 30 * 60_000);
+  assert.equal(sinceCutoff("2h", now), Date.parse("2026-09-26T10:00:00Z"));
+  assert.equal(sinceCutoff("3D", now), Date.parse("2026-09-23T12:00:00Z"));
+  assert.equal(sinceCutoff("1w", now), Date.parse("2026-09-19T12:00:00Z"));
+  assert.equal(sinceCutoff("2026-09-25T09:00:00Z", now), Date.parse("2026-09-25T09:00:00Z"));
+  assert.equal(sinceCutoff("yesterday", now), null);
+});
+
+test("commentedLines: open passage threads by line, diagrams and resolved left out", () => {
+  const text = "# Title\n\nFirst para. ^a1\n\nSecond para mentions [[api]].\n";
+  const lines = commentedLines(text, [
+    thread("t1", { anchor: { type: "text", blockId: "a1" } }),
+    thread("t2", { anchor: { type: "text", blockId: "a1" } }),
+    thread("t3", { anchor: { type: "link", href: "api" } }),
+    thread("t4", { anchor: { type: "header", quote: "Title" }, resolved: true }),
+    thread("t5", { anchor: { type: "mermaidNode", node: "A" } }),
+    thread("t6", { anchor: { type: "text", quote: "not in the doc" } }),
+  ]);
+  assert.deepEqual([...lines], [
+    [2, ["t1", "t2"]],
+    [4, ["t3"]],
+  ]);
+});
+
 test("startsFolded: resolved threads and threads longer than FOLD_OVER start folded", () => {
   const msg = { author: "a", ts: "1", body: "" };
   assert.equal(startsFolded(thread("t1")), false);
@@ -507,4 +537,38 @@ test("threadsDigest: a lead-in says what to do, and outdated threads show today'
   assert.match(out, /### \[t2\][^\n]*\nreviewed against: [^\n]*\nnow: \(no longer in the doc\)/);
   assert.doesNotMatch(out, /ignored when not outdated/);
   assert.doesNotMatch(threadsDigest([], { scope: "x" }), /These are review comments/);
+});
+
+test("anchorContentIn: a passage's own text, so edits elsewhere leave it alone", () => {
+  const doc = "---\na: 1\n---\nFirst   para.\n^p1\n\nSecond para. ^p2\n\n## Setup\n\n![](img/a.png) [docs](https://x.y)\n";
+  assert.equal(anchorContentIn(doc, { type: "text", blockId: "p2" }), "Second para.");
+  assert.equal(anchorContentIn(doc, { type: "text", blockId: "gone" }), null);
+  assert.equal(anchorContentIn(doc, { type: "text", quote: "Second  para." }), "Second para.");
+  assert.equal(anchorContentIn(doc, { type: "text" }), undefined);
+  assert.equal(anchorContentIn(doc, { type: "header", quote: "Setup" }), "Setup");
+  assert.equal(anchorContentIn(doc, { type: "header", quote: "Install" }), null);
+  assert.equal(anchorContentIn(doc, { type: "image", src: "img/a.png" }), "img/a.png");
+  assert.equal(anchorContentIn(doc, { type: "link", href: "https://x.y", quote: "docs" }), "https://x.y docs");
+  assert.equal(anchorContentIn(doc, { type: "link", href: "https://gone" }), null);
+  // an edit to another paragraph doesn't change p2's content
+  const edited = doc.replace("First   para.", "First paragraph, reworded.");
+  assert.equal(anchorContentIn(edited, { type: "text", blockId: "p2" }), anchorContentIn(doc, { type: "text", blockId: "p2" }));
+});
+
+test("anchorContentIn: diagram boxes and arrows read from mermaid fences only", () => {
+  const doc = "A is prose.\n\n```mermaid\nflowchart LR\n  A[Start] --> B\n```\n";
+  assert.equal(anchorContentIn(doc, { type: "mermaidNode", node: "A" }), "A[Start]");
+  assert.equal(anchorContentIn(doc, { type: "mermaidNode", node: "B" }), "B");
+  assert.equal(anchorContentIn(doc, { type: "mermaidNode", node: "C" }), null);
+  assert.equal(anchorContentIn(doc, { type: "mermaidEdge", from: "A", to: "B" }), "A[Start] --> B");
+  assert.equal(anchorContentIn(doc, { type: "mermaidEdge", from: "B", to: "A" }), null);
+});
+
+test("anchorChanged: compares the commented passage in the reviewed and current docs", () => {
+  const then = "Intro. ^a\n\nThe claim. ^b\n";
+  const anchor = { type: "text", blockId: "b" };
+  assert.equal(anchorChanged(then, "Intro, rewritten. ^a\n\nThe claim. ^b\n", anchor), false);
+  assert.equal(anchorChanged(then, "Intro. ^a\n\nThe new claim. ^b\n", anchor), true);
+  assert.equal(anchorChanged(then, "Intro. ^a\n", anchor), true); // gone
+  assert.equal(anchorChanged(then, then, { type: "text" }), undefined); // can't pin down
 });

@@ -11,8 +11,11 @@ import {
   debounce,
   normalizePath,
   parseYaml,
+  setIcon,
   stringifyYaml,
 } from "obsidian";
+import { RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
+import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import xcallbackSchema from "./protocol/xcallback.schema.json";
 import { CommentsView, VIEW_TYPE_COMMENTS } from "./views/comments-view";
 import {
@@ -25,9 +28,14 @@ import {
   bodyHash,
   ordinalsFromLog,
   mermaidBlocksFrom,
+  anchorContentIn,
+  anchorChanged,
+  escapeRegExp,
+  MERMAID_SHAPES,
   effectiveReviewer,
   filterThreads,
   threadsDigest,
+  commentedLines,
   type DigestFile,
   type ExportFilter,
 } from "./pure";
@@ -142,6 +150,31 @@ function cmOf(editor: Editor): CmEditorView | null {
   return (editor as unknown as { cm?: CmEditorView }).cm ?? null;
 }
 
+/** Live Preview's mark beside a commented passage: a line class on each
+ *  commented source line. The plugin sends the line numbers in after each scan;
+ *  in between, edits carry the marks along with the text. */
+const setCommentedLines = StateEffect.define<number[]>();
+const COMMENTED_LINE = Decoration.line({ class: "review-md-commented-line" });
+const commentedLineField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (!e.is(setCommentedLines)) continue;
+      const b = new RangeSetBuilder<Decoration>();
+      for (const n of e.value) {
+        if (n >= 0 && n < tr.state.doc.lines) {
+          const from = tr.state.doc.line(n + 1).from;
+          b.add(from, from, COMMENTED_LINE);
+        }
+      }
+      deco = b.finish();
+    }
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
 /** Node's `require`, or undefined on mobile / restricted renderers. */
 function nodeRequire(mod: string): any {
   try {
@@ -151,12 +184,6 @@ function nodeRequire(mod: string): any {
   }
 }
 
-/** Alternation of every mermaid node shape wrapper (`[..]`, `(..)`, `([..])`, …),
- *  longest-first so `[[..]]` wins over `[..]`. Used to pull a node's declared
- *  shape+label out of diagram source. Kept in one place — the preview builders and
- *  the per-anchor staleness check must read node declarations identically. */
-const MERMAID_SHAPES =
-  "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
 
 export default class ReviewMdPlugin extends Plugin {
   /** True while "comment mode" is armed: the reader is click-to-comment. */
@@ -184,6 +211,8 @@ export default class ReviewMdPlugin extends Plugin {
    *  guards a host mid-apply so our own badge writes don't re-enter. */
   private rvObservers = new WeakMap<MarkdownView, MutationObserver>();
   private rvAugmenting = new WeakSet<HTMLElement>();
+  /** The commented lines last sent to each Live Preview editor. */
+  private lpMarked = new WeakMap<MarkdownView, string>();
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -212,6 +241,7 @@ export default class ReviewMdPlugin extends Plugin {
         try {
           this.validateParams(op, params);
           if (op.id === "reply") await this.handleReply(params);
+          else if (op.id === "resolve") await this.handleResolve(params);
           else if (op.id === "export") await this.handleExport(params);
           else await this.handleUri(op, params);
           if (params["x-success"]) window.open(String(params["x-success"]));
@@ -316,6 +346,11 @@ export default class ReviewMdPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("file-open", () => this.ensureMermaidAugmenter()),
     );
+    // Switching reading view ↔ Live Preview in the same tab fires neither of the
+    // above, only layout-change (which also fires on resizes, so debounce it).
+    this.registerEvent(
+      this.app.workspace.on("layout-change", debounce(() => this.ensureMermaidAugmenter(), 150, true)),
+    );
     this.app.workspace.onLayoutReady(() => this.ensureMermaidAugmenter());
 
     // Durable text anchoring (req: block-refs survive edits): stamp each rendered
@@ -324,6 +359,7 @@ export default class ReviewMdPlugin extends Plugin {
     // here (in a post-processor), not on an arbitrary click — so we cache it onto
     // the DOM. Line numbers shift on edit, so this is read fresh at click time,
     // never trusted stale. See docs/issues/durable-anchoring.md.
+    this.registerEditorExtension(commentedLineField);
     this.registerMarkdownPostProcessor((el, ctx) => {
       const info = ctx.getSectionInfo(el);
       if (!info) return;
@@ -451,12 +487,12 @@ export default class ReviewMdPlugin extends Plugin {
   private ensureLivePreviewAugmenter(view: MarkdownView): void {
     if (view.getMode?.() !== "source") return;
     if (this.lpObservers.has(view)) {
-      void this.scanLivePreviewMermaid(view);
+      void this.scanLivePreview(view);
       return;
     }
     const cm = cmOf(view.editor);
     if (!cm) return;
-    const scan = debounce(() => void this.scanLivePreviewMermaid(view), 120, false);
+    const scan = debounce(() => void this.scanLivePreview(view), 120, false);
     const obs = new MutationObserver(scan);
     obs.observe(cm.contentDOM, { childList: true, subtree: true });
     this.lpObservers.set(view, obs);
@@ -468,7 +504,7 @@ export default class ReviewMdPlugin extends Plugin {
       obs.disconnect();
       this.lpObservers.delete(view);
     });
-    void this.scanLivePreviewMermaid(view);
+    void this.scanLivePreview(view);
   }
 
   /** Attach a debounced MutationObserver to the reading view's render container
@@ -480,7 +516,7 @@ export default class ReviewMdPlugin extends Plugin {
   private ensureReadingViewAugmenter(view: MarkdownView): void {
     if (view.getMode?.() === "source") return;
     if (this.rvObservers.has(view)) {
-      void this.scanReadingViewMermaid(view);
+      void this.scanReadingView(view);
       return;
     }
     // `previewMode.containerEl` is the stable per-view reading-view element; its
@@ -489,7 +525,7 @@ export default class ReviewMdPlugin extends Plugin {
       (view.previewMode as unknown as { containerEl?: HTMLElement } | undefined)?.containerEl ??
       (view.containerEl.querySelector(".markdown-reading-view") as HTMLElement | null);
     if (!container) return;
-    const scan = debounce(() => void this.scanReadingViewMermaid(view), 120, false);
+    const scan = debounce(() => void this.scanReadingView(view), 120, false);
     const obs = new MutationObserver(scan);
     obs.observe(container, { childList: true, subtree: true });
     this.rvObservers.set(view, obs);
@@ -499,7 +535,87 @@ export default class ReviewMdPlugin extends Plugin {
       obs.disconnect();
       this.rvObservers.delete(view);
     });
-    void this.scanReadingViewMermaid(view);
+    void this.scanReadingView(view);
+  }
+
+  /** Everything a reading view shows about comments: marks beside commented
+   *  passages, then the diagram overlay. */
+  private async scanReadingView(view: MarkdownView): Promise<void> {
+    await this.markReadingViewPassages(view);
+    await this.scanReadingViewMermaid(view);
+  }
+
+  /** The same for Live Preview. */
+  private async scanLivePreview(view: MarkdownView): Promise<void> {
+    await this.markLivePreviewPassages(view);
+    await this.scanLivePreviewMermaid(view);
+  }
+
+  /** Reading view: an accent bar and a speech-bubble button beside each section
+   *  that holds an open comment. The button opens the thread. Sections carry
+   *  their source lines (the post-processor stamps them), so the match is by line.
+   *  A section is only touched when its comments change, so this doesn't loop
+   *  with the view's watcher. */
+  private async markReadingViewPassages(view: MarkdownView): Promise<void> {
+    if (view.getMode?.() === "source") return;
+    const file = view.file;
+    const container =
+      (view.previewMode as unknown as { containerEl?: HTMLElement } | undefined)?.containerEl ??
+      (view.containerEl.querySelector(".markdown-reading-view") as HTMLElement | null);
+    if (!file || !container) return;
+    const sections = Array.from(container.querySelectorAll<HTMLElement>("[data-review-md-line-start]"));
+    if (!sections.length) return;
+    const lines = commentedLines(await this.app.vault.cachedRead(file), await this.readThreads(file));
+    for (const sec of sections) {
+      const start = Number(sec.dataset.reviewMdLineStart);
+      const end = Number(sec.dataset.reviewMdLineEnd);
+      const ids = [...lines].filter(([l]) => l >= start && l <= end).flatMap(([, t]) => t);
+      // Skip only when the ids match AND the button is still there: Obsidian can
+      // re-render a section's children while keeping the element (and its data),
+      // which dropped the button but left the bar.
+      const hasMark = !!sec.querySelector(":scope > .review-md-passage-mark");
+      if ((sec.dataset.reviewMdThreads ?? "") === ids.join(",") && (hasMark || !ids.length)) continue;
+      sec.querySelector(":scope > .review-md-passage-mark")?.remove();
+      if (!ids.length) {
+        delete sec.dataset.reviewMdThreads;
+        sec.removeClass("review-md-commented");
+        continue;
+      }
+      sec.dataset.reviewMdThreads = ids.join(",");
+      sec.addClass("review-md-commented");
+      const n = ids.length;
+      const mark = sec.createEl("button", {
+        cls: "review-md-passage-mark clickable-icon",
+        attr: { "data-thread": ids[0], "aria-label": n > 1 ? `${n} comments — open` : "Open comment" },
+      });
+      setIcon(mark, "message-square");
+      if (n > 1) mark.createSpan({ text: String(n) });
+      mark.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void this.openThreadInSidebar(ids[0]);
+      };
+    }
+  }
+
+  /** Live Preview: the line marks (see commentedLineField). Sends new line
+   *  numbers only when they changed, so edits and re-scans don't churn. */
+  private async markLivePreviewPassages(view: MarkdownView): Promise<void> {
+    if (view.getMode?.() !== "source") return;
+    const cm = cmOf(view.editor) as unknown as EditorView | null;
+    const file = view.file;
+    if (!cm || !file) return;
+    const lines = [...commentedLines(view.editor.getValue(), await this.readThreads(file)).keys()].sort((a, b) => a - b);
+    const key = lines.join(",");
+    if (this.lpMarked.get(view) === key) return;
+    this.lpMarked.set(view, key);
+    cm.dispatch({ effects: setCommentedLines.of(lines) });
+  }
+
+  /** Show the sidebar with this thread selected. */
+  private async openThreadInSidebar(threadId: string): Promise<void> {
+    await this.activateCommentsView();
+    this.focusThreadInSidebar(threadId);
   }
 
   /** Find each rendered mermaid diagram in a reading view and augment any that
@@ -769,9 +885,9 @@ export default class ReviewMdPlugin extends Plugin {
       return;
     }
 
-    // An injected edge badge opens its existing thread (same rule: don't comment
-    // on a comment).
-    const edgeBadge = target.closest<HTMLElement>(".review-md-edge-badge");
+    // An injected edge badge or passage mark opens its existing thread (same
+    // rule: don't comment on a comment).
+    const edgeBadge = target.closest<HTMLElement>(".review-md-edge-badge, .review-md-passage-mark");
     if (edgeBadge) {
       const tid = edgeBadge.dataset.thread;
       if (tid) {
@@ -1017,7 +1133,7 @@ export default class ReviewMdPlugin extends Plugin {
       .map((l) => l.view)
       .filter((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path)
       .forEach((v) => {
-        if (v.getMode?.() === "source") void this.scanLivePreviewMermaid(v);
+        if (v.getMode?.() === "source") void this.scanLivePreview(v);
         else {
           v.previewMode?.rerender(true);
           this.rescanReadingViewSoon(v);
@@ -1031,7 +1147,7 @@ export default class ReviewMdPlugin extends Plugin {
    *  the diagram were wiped, until the doc tab was focused again. The scan skips
    *  diagrams that are already marked, so extra passes cost nothing. */
   private rescanReadingViewSoon(view: MarkdownView): void {
-    for (const ms of [50, 250, 750, 1500]) window.setTimeout(() => void this.scanReadingViewMermaid(view), ms);
+    for (const ms of [50, 250, 750, 1500]) window.setTimeout(() => void this.scanReadingView(view), ms);
   }
 
   /** Push a new thread onto the file's sidecar and return its id. When
@@ -1126,98 +1242,13 @@ export default class ReviewMdPlugin extends Plugin {
     return bodyHash(text);
   }
 
-  /**
-   * The current text of *just what a thread anchors to*, read from the latest file
-   * — the per-anchor staleness signal (a thread is outdated only when ITS content
-   * changed, not when the file changed anywhere; Omar, 2026-09-21):
-   *   - `string`    → the anchored content as it stands now (node declaration, edge
-   *                   link line, block/heading text, image src), normalised.
-   *   - `null`      → the target is gone (node/edge/block/heading/image removed) →
-   *                   the thread is outdated.
-   *   - `undefined` → this anchor can't be precisely extracted → caller falls back
-   *                   to the coarse `bodyHash`.
-   * Normalisation collapses whitespace so reflowing/re-indenting the anchored text
-   * without changing its words doesn't count as a change.
-   */
+  /** The current text of just what a thread anchors to — see `anchorContentIn`
+   *  (src/pure.ts), which the `reviews` CLI shares so both agree on "outdated". */
   async anchorContentFor(
     file: TFile,
     anchor: Record<string, unknown>,
   ): Promise<string | null | undefined> {
-    const a = anchor as {
-      type?: string;
-      node?: string;
-      from?: string;
-      to?: string;
-      quote?: string;
-      blockId?: string;
-      src?: string;
-      href?: string;
-    };
-    const norm = (s: string) => s.replace(/\s+/g, " ").trim();
-    switch (a.type) {
-      case "mermaidNode": {
-        if (!a.node) return undefined;
-        const blocks = await this.mermaidBlocksIn(file);
-        for (const b of blocks) {
-          const dm = b.match(new RegExp(`\\b${escapeRegExp(a.node)}\\s*(${MERMAID_SHAPES})`));
-          if (dm) return norm(`${a.node}${dm[1]}`); // declared node: id + shape/label
-        }
-        // Present but label-less (only ever named as an edge endpoint): its identity
-        // is the id itself, so it's "unchanged" as long as the id still appears.
-        const idRe = new RegExp(`(^|[^\\w])${escapeRegExp(a.node)}([^\\w]|$)`, "m");
-        if (blocks.some((b) => idRe.test(b))) return a.node;
-        return null; // node removed
-      }
-      case "mermaidEdge": {
-        if (!a.from || !a.to) return undefined;
-        const blocks = await this.mermaidBlocksIn(file);
-        const link = new RegExp(
-          `\\b${escapeRegExp(a.from)}\\b[^\\n]*?(?:--+>?|==+>?|-\\.-*>?|~~+)[^\\n]*?\\b${escapeRegExp(a.to)}\\b`,
-        );
-        for (const b of blocks) {
-          const m = b.match(link);
-          if (m) return norm(m[0]);
-        }
-        return null; // edge removed
-      }
-      case "text": {
-        const body = stripFrontmatter(await this.app.vault.read(file));
-        if (a.blockId) {
-          const block = blockTextFor(body, a.blockId);
-          return block == null ? null : norm(block);
-        }
-        if (a.quote) return norm(body).includes(norm(a.quote)) ? norm(a.quote) : null;
-        return undefined; // no durable anchor to check
-      }
-      case "header": {
-        if (!a.quote) return undefined;
-        const body = stripFrontmatter(await this.app.vault.read(file));
-        const q = norm(a.quote);
-        const present = body.split(/\r?\n/).some((l) => {
-          const m = l.match(/^#{1,6}\s+(.*)$/);
-          return m != null && norm(m[1].replace(/\s+\^[A-Za-z0-9_-]+\s*$/, "")) === q;
-        });
-        return present ? q : null;
-      }
-      case "image": {
-        if (!a.src) return undefined;
-        const text = await this.app.vault.read(file);
-        return text.includes(a.src) ? a.src : null;
-      }
-      case "link": {
-        const href = a.href ?? "";
-        const q = a.quote ?? "";
-        if (!href && !q) return undefined;
-        // The link is "still there" as long as its target (href) — or, for a
-        // bare-text link, its display text — appears in the source. href+text
-        // together are the anchored identity, so a change to either is outdated.
-        const text = await this.app.vault.read(file);
-        const present = href ? text.includes(href) : norm(text).includes(norm(q));
-        return present ? norm(`${href} ${q}`) : null;
-      }
-      default:
-        return undefined;
-    }
+    return anchorContentIn(await this.app.vault.read(file), anchor);
   }
 
   /** Hash of a thread's anchored content (see anchorContentFor), or undefined when
@@ -1343,9 +1374,11 @@ export default class ReviewMdPlugin extends Plugin {
    * anchors to changed or was removed since it was authored — an edit to an
    * unrelated part of the file leaves it current (Omar, 2026-09-21: "unless on our
    * latest, we removed content"). When the thread carries an `anchorHash` we compare
-   * against just its anchored content now; if that content can't be extracted we
-   * fall back to the coarse whole-body `bodyHash`. Threads with no `rev` (e.g.
-   * seeded fixtures) are never outdated.
+   * against just its anchored content now. Older threads have no `anchorHash`; for
+   * those we compare the anchored content in the git version the reviewer saw with
+   * today's (`anchorChanged`). Only when neither works do we fall back to the coarse
+   * whole-body `bodyHash`. Threads with no `rev` (e.g. seeded fixtures) are never
+   * outdated. The `reviews` CLI applies the same order (scripts/reviews.mjs).
    */
   async isThreadOutdated(file: TFile, thread: ReviewThread): Promise<boolean> {
     const rev = thread.rev;
@@ -1354,10 +1387,32 @@ export default class ReviewMdPlugin extends Plugin {
       const content = await this.anchorContentFor(file, thread.anchor);
       if (content === null) return true; // the anchored target is gone
       if (typeof content === "string") return (await sha256Short(content)) !== rev.anchorHash;
-      // content === undefined: can't extract precisely → fall through to bodyHash
+      // content === undefined: can't extract precisely → fall through
+    }
+    const commit = rev.git?.commit;
+    if (commit && commit !== WORKING_REV) {
+      const then = await this.reviewedBody(file, commit);
+      if (then !== null) {
+        const now = stripFrontmatter(await this.app.vault.read(file));
+        const changed = anchorChanged(then, now, thread.anchor);
+        if (changed !== undefined) return changed;
+      }
     }
     if (!rev.bodyHash) return false;
     return (await this.bodyHashFor(file)) !== rev.bodyHash;
+  }
+
+  /** bodyAtRevision, remembered: a commit's content never changes, and every render
+   *  of the sidebar asks again for each older thread. */
+  private reviewedBodies = new Map<string, Promise<string | null>>();
+  private reviewedBody(file: TFile, commit: string): Promise<string | null> {
+    const key = `${file.path}\0${commit}`;
+    let p = this.reviewedBodies.get(key);
+    if (!p) {
+      p = this.bodyAtRevision(file, commit);
+      this.reviewedBodies.set(key, p);
+    }
+    return p;
   }
 
   /**
@@ -1543,6 +1598,17 @@ export default class ReviewMdPlugin extends Plugin {
     await leaf.openFile(file);
     this.app.workspace.openLinkText(`${file.path}#^${threadId}`, file.path, false);
     new Notice(`review-md: replied to ${threadId} in ${file.path}`);
+  }
+
+  /** `resolve` action: mark a thread resolved, or open again with `state=open`. */
+  private async handleResolve(params: Record<string, string>): Promise<void> {
+    const file = this.resolveFile(params.file);
+    const resolved = (params.state || "resolved") === "resolved";
+    if (!(await this.readThreads(file)).some((t) => t.id === params.thread)) {
+      throw new Error(`thread not found: ${params.thread}`);
+    }
+    await this.setThreadResolved(file, params.thread, resolved);
+    new Notice(`review-md: ${resolved ? "resolved" : "reopened"} ${params.thread} in ${file.path}`);
   }
 
   /**
@@ -2135,10 +2201,6 @@ export default class ReviewMdPlugin extends Plugin {
   }
 }
 
-/** Escape a string for literal use inside a RegExp. */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /**
  * Read an edge's source/target node ids + parallel-edge index off a mermaid link

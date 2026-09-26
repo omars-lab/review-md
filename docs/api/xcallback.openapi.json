@@ -167,6 +167,88 @@
         }
       }
     },
+    "/review-md-resolve": {
+      "get": {
+        "operationId": "resolve",
+        "summary": "Resolve or reopen a thread",
+        "description": "Mark a comment thread resolved (the default) or open again. Use it after answering a thread, so answered threads don't pile up as open.\n\nInvoke as: `obsidian://review-md-resolve?…`\n\nExample: `obsidian://review-md-resolve?vault=docs&file=designs%2Fdesign.md&thread=d1a2b3`",
+        "parameters": [
+          {
+            "name": "vault",
+            "in": "query",
+            "required": true,
+            "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "docs"
+          },
+          {
+            "name": "file",
+            "in": "query",
+            "required": true,
+            "description": "Vault-relative path to the markdown file that holds the thread.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "designs/design.md"
+          },
+          {
+            "name": "thread",
+            "in": "query",
+            "required": true,
+            "description": "Id of the thread to resolve or reopen.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "d1a2b3"
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "description": "`resolved` closes the thread; `open` reopens it.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "resolved",
+                "open"
+              ],
+              "default": "resolved"
+            },
+            "example": "open"
+          },
+          {
+            "name": "x-success",
+            "in": "query",
+            "required": false,
+            "description": "URL opened once the thread's state is stored (x-callback-url).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "myapp://resolved"
+          },
+          {
+            "name": "x-error",
+            "in": "query",
+            "required": false,
+            "description": "URL opened when the operation fails (x-callback-url).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "myapp://failed"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success. If `x-success` was supplied, that URL is opened."
+          },
+          "400": {
+            "description": "Missing or invalid parameters. If `x-error` was supplied, that URL is opened."
+          }
+        }
+      }
+    },
     "/review-md-export": {
       "get": {
         "operationId": "export",

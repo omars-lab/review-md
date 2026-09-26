@@ -273,12 +273,16 @@ Obsidian, so the plugin stays the only thing that writes them. With the
 reviews help                                   # every command, with examples
 reviews stats docs                             # where is feedback waiting?
 reviews list docs --open --waiting claude      # open threads waiting on claude
+reviews list docs --since 1d                   # threads with a message in the last day
 reviews find "frontmatter" docs                # threads mentioning some words
 reviews show docs/designs/design.md d1a2b3     # one thread in full
+reviews diff docs/designs/design.md d1a2b3     # the passage then (from git) vs now
 reviews reply docs/designs/design.md d1a2b3 "Fixed in abc123." --author claude
+reviews reply docs/designs/design.md d1a2b3 "Fixed in abc123." --resolve   # answer and close
+reviews resolve docs/designs/design.md d1a2b3 [--reopen]
 ```
 
-Add `--json` to `list`/`find`/`show`/`stats` for structured output. The data format and
+Add `--json` to `list`/`find`/`show`/`diff`/`stats` for structured output. The data format and
 exit codes are in [`docs/agent-contract.md`](docs/agent-contract.md). `reply` waits
 until the reply is written and exits 4 if it never arrives.
 

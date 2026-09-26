@@ -34,6 +34,20 @@
       ]
     },
     {
+      "id": "resolve",
+      "action": "review-md-resolve",
+      "summary": "Resolve or reopen a thread",
+      "description": "Mark a comment thread resolved (the default) or open again. Use it after answering a thread, so answered threads don't pile up as open.",
+      "params": [
+        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).", "example": "docs" },
+        { "name": "file", "required": true, "type": "string", "description": "Vault-relative path to the markdown file that holds the thread.", "example": "designs/design.md" },
+        { "name": "thread", "required": true, "type": "string", "description": "Id of the thread to resolve or reopen.", "example": "d1a2b3" },
+        { "name": "state", "required": false, "type": "string", "enum": ["resolved", "open"], "default": "resolved", "description": "`resolved` closes the thread; `open` reopens it.", "example": "open" },
+        { "name": "x-success", "required": false, "type": "string", "description": "URL opened once the thread's state is stored (x-callback-url).", "example": "myapp://resolved" },
+        { "name": "x-error", "required": false, "type": "string", "description": "URL opened when the operation fails (x-callback-url).", "example": "myapp://failed" }
+      ]
+    },
+    {
       "id": "export",
       "action": "review-md-export",
       "summary": "Copy threads to the clipboard for an AI tool",

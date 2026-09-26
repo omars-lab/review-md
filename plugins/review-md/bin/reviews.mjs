@@ -7372,6 +7372,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, join, basename, extname, relative, resolve } from "node:path";
 
 // src/pure.ts
+var WORKING_REV = "working";
 function stripFrontmatter(text) {
   if (!text.startsWith("---")) return text;
   const m = text.match(/^---\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*\r?\n?/);
@@ -7379,6 +7380,99 @@ function stripFrontmatter(text) {
 }
 function stripBlockIds(text) {
   return text.replace(/[ \t]+\^[A-Za-z0-9_-]+[ \t]*$/gm, "").replace(/^\^[A-Za-z0-9_-]+[ \t]*$/gm, "");
+}
+function removeBlockIdFromText(text, blockId) {
+  const esc = blockId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(`[ \\t]+\\^${esc}(?=[ \\t]*$)`, "gm"), "").replace(new RegExp(`^\\^${esc}[ \\t]*\\r?\\n?`, "gm"), "");
+}
+function blockTextFor(text, blockId) {
+  const esc = blockId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const idRe = new RegExp(`(^|\\s)\\^${esc}[ \\t]*$`);
+  const lines = text.split(/\r?\n/);
+  const idx = lines.findIndex((l) => idRe.test(l));
+  if (idx < 0) return null;
+  const fence = (l) => /^[ \t]*`{3,}/.test(l);
+  let start = idx;
+  let end = idx;
+  while (start > 0 && lines[start - 1].trim() !== "" && !fence(lines[start - 1])) start--;
+  while (end + 1 < lines.length && lines[end + 1].trim() !== "" && !fence(lines[end + 1])) end++;
+  return removeBlockIdFromText(lines.slice(start, end + 1).join("\n"), blockId).trim();
+}
+function mermaidBlocksFrom(text) {
+  const re = /^[ \t]*`{3,}\s*mermaid\s*\r?\n([\s\S]*?)\r?\n[ \t]*`{3,}\s*$/gm;
+  const blocks = [];
+  let m;
+  while ((m = re.exec(text)) !== null) blocks.push(m[1]);
+  return blocks;
+}
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+var MERMAID_SHAPES = "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
+function anchorChanged(thenText, nowText, anchor) {
+  const now = anchorContentIn(nowText, anchor);
+  if (now === null) return true;
+  const then = anchorContentIn(thenText, anchor);
+  if (then == null || now === void 0) return void 0;
+  return then !== now;
+}
+function anchorContentIn(text, anchor) {
+  const a = anchor;
+  const norm = (s) => s.replace(/\s+/g, " ").trim();
+  switch (a.type) {
+    case "mermaidNode": {
+      if (!a.node) return void 0;
+      const blocks = mermaidBlocksFrom(text);
+      for (const b of blocks) {
+        const dm = b.match(new RegExp(`\\b${escapeRegExp(a.node)}\\s*(${MERMAID_SHAPES})`));
+        if (dm) return norm(`${a.node}${dm[1]}`);
+      }
+      const idRe = new RegExp(`(^|[^\\w])${escapeRegExp(a.node)}([^\\w]|$)`, "m");
+      if (blocks.some((b) => idRe.test(b))) return a.node;
+      return null;
+    }
+    case "mermaidEdge": {
+      if (!a.from || !a.to) return void 0;
+      const link = new RegExp(
+        `\\b${escapeRegExp(a.from)}\\b[^\\n]*?(?:--+>?|==+>?|-\\.-*>?|~~+)[^\\n]*?\\b${escapeRegExp(a.to)}\\b`
+      );
+      for (const b of mermaidBlocksFrom(text)) {
+        const m = b.match(link);
+        if (m) return norm(m[0]);
+      }
+      return null;
+    }
+    case "text": {
+      const body = stripFrontmatter(text);
+      if (a.blockId) {
+        const block = blockTextFor(body, a.blockId);
+        return block == null ? null : norm(block);
+      }
+      if (a.quote) return norm(body).includes(norm(a.quote)) ? norm(a.quote) : null;
+      return void 0;
+    }
+    case "header": {
+      if (!a.quote) return void 0;
+      const q = norm(a.quote);
+      const present = stripFrontmatter(text).split(/\r?\n/).some((l) => {
+        const m = l.match(/^#{1,6}\s+(.*)$/);
+        return m != null && norm(m[1].replace(/\s+\^[A-Za-z0-9_-]+\s*$/, "")) === q;
+      });
+      return present ? q : null;
+    }
+    case "image":
+      if (!a.src) return void 0;
+      return text.includes(a.src) ? a.src : null;
+    case "link": {
+      const href = a.href ?? "";
+      const q = a.quote ?? "";
+      if (!href && !q) return void 0;
+      const present = href ? text.includes(href) : norm(text).includes(norm(q));
+      return present ? norm(`${href} ${q}`) : null;
+    }
+    default:
+      return void 0;
+  }
 }
 function anchorTypeLabel(anchor) {
   switch (String(anchor?.type ?? "unknown")) {
@@ -7399,6 +7493,28 @@ function threadSearchText(t) {
 function threadMatches(t, query) {
   const q = query.trim().toLowerCase();
   return !q || threadSearchText(t).includes(q);
+}
+function latestTs(t) {
+  let max = 0;
+  for (const m of t.messages) {
+    const n = Date.parse(m.ts);
+    if (!Number.isNaN(n) && n > max) max = n;
+  }
+  if (max === 0) {
+    const ts = t.rev?.ts;
+    const n = typeof ts === "string" ? Date.parse(ts) : NaN;
+    if (!Number.isNaN(n)) max = n;
+  }
+  return max;
+}
+function sinceCutoff(spec, now) {
+  const age = spec.trim().match(/^(\d+)\s*([mhdw])$/i);
+  if (age) {
+    const unit = { m: 6e4, h: 36e5, d: 864e5, w: 6048e5 }[age[2].toLowerCase()];
+    return now - Number(age[1]) * unit;
+  }
+  const at = Date.parse(spec);
+  return Number.isNaN(at) ? null : at;
 }
 function anchorWhere(anchor = {}) {
   const s = (v, max) => String(v ?? "").replace(/\s+/g, " ").slice(0, max);
@@ -7460,8 +7576,27 @@ function threadsDigest(files, opts = { scope: "vault" }) {
 }
 
 // scripts/reviews.mjs
+function sha256Short(text) {
+  return createHash("sha256").update(text).digest("hex").slice(0, 12);
+}
 function bodyHash(text) {
-  return createHash("sha256").update(stripBlockIds(stripFrontmatter(text))).digest("hex").slice(0, 12);
+  return sha256Short(stripBlockIds(stripFrontmatter(text)));
+}
+function staleness(t, text, doc) {
+  if (text == null || !t.rev) return { outdated: false };
+  const anchor = t.anchor ?? {};
+  const current = anchorContentIn(text, anchor);
+  const withCurrent = (outdated) => current === void 0 ? { outdated } : { outdated, current };
+  if (t.rev.anchorHash && current !== void 0) {
+    return withCurrent(current === null || sha256Short(current) !== t.rev.anchorHash);
+  }
+  const git = t.rev.git;
+  if (git && git.commit !== WORKING_REV) {
+    const thenText = reviewedText(doc, git);
+    const changed = thenText == null ? void 0 : anchorChanged(thenText, text, anchor);
+    if (changed !== void 0) return withCurrent(changed);
+  }
+  return withCurrent(t.rev.bodyHash ? t.rev.bodyHash !== bodyHash(text) : false);
 }
 function sidecarPathFor(file) {
   return join(dirname(file), `.${basename(file, extname(file))}.comments.md`);
@@ -7487,11 +7622,11 @@ function readDoc(file) {
   const raw = readFileSync(sidecarPathFor(file), "utf8");
   const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   const review = fmMatch ? (0, import_yaml.parse)(fmMatch[1])?.review : null;
-  const currentHash = existsSync(file) ? bodyHash(readFileSync(file, "utf8")) : null;
+  const text = existsSync(file) ? readFileSync(file, "utf8") : null;
   const threads = (review?.threads ?? []).map((t) => ({
     ...t,
     messages: t.messages ?? [],
-    outdated: t.rev?.bodyHash && currentHash ? t.rev.bodyHash !== currentHash : false
+    ...staleness(t, text, file)
   }));
   return { uid: review?.uid ?? null, threads };
 }
@@ -7524,12 +7659,18 @@ function waitingOn(files, author) {
     threads: f.threads.filter((t) => (t.messages.at(-1)?.author ?? "").toLowerCase() !== who)
   }));
 }
+function activeSince(files, since) {
+  if (!since) return files;
+  const cutoff = sinceCutoff(since, Date.now());
+  if (cutoff === null) fail(2, `--since wants an age like 2h or 3d, or a date like 2026-09-26 (got "${since}")`);
+  return files.map((f) => ({ ...f, threads: f.threads.filter((t) => latestTs(t) > cutoff) }));
+}
 function fail(code, msg) {
   console.error(`reviews: ${msg}`);
   process.exit(code);
 }
-var VALUE_FLAGS = /* @__PURE__ */ new Set(["text", "vault", "author", "waiting"]);
-var BOOL_FLAGS = /* @__PURE__ */ new Set(["open", "unresolved", "json", "dry-run", "help"]);
+var VALUE_FLAGS = /* @__PURE__ */ new Set(["text", "vault", "author", "waiting", "since"]);
+var BOOL_FLAGS = /* @__PURE__ */ new Set(["open", "unresolved", "json", "dry-run", "help", "resolve", "reopen"]);
 function parseArgs(argv) {
   const flags = {};
   const pos = [];
@@ -7567,9 +7708,30 @@ function openUrl(url2, flags) {
   }
 }
 var url = (action, params) => `obsidian://${action}?${new URLSearchParams(params).toString().replace(/\+/g, "%20")}`;
+var reviewedCache = /* @__PURE__ */ new Map();
+function reviewedText(doc, git) {
+  const key = `${resolve(doc)}\0${git.blob ?? ""}\0${git.commit}`;
+  if (!reviewedCache.has(key)) reviewedCache.set(key, readReviewed(doc, git));
+  return reviewedCache.get(key);
+}
+function readReviewed(doc, git) {
+  const run = (args) => {
+    try {
+      return execFileSync("git", ["-C", dirname(resolve(doc)), ...args], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 5e3,
+        maxBuffer: 16 * 1024 * 1024
+      });
+    } catch {
+      return null;
+    }
+  };
+  return (git.blob && run(["cat-file", "-p", git.blob])) ?? run(["show", `${git.commit}:./${basename(doc)}`]);
+}
 var COMMANDS = {
   list: {
-    usage: "reviews list <doc.md | folder> [--open] [--text <words>] [--waiting <name>] [--vault <name>] [--json]",
+    usage: "reviews list <doc.md | folder> [--open] [--text <words>] [--waiting <name>] [--since <age|date>] [--vault <name>] [--json]",
     summary: "Print the threads on a doc, or every doc under a folder",
     help: `Prints each thread: where it's anchored, open/resolved, OUTDATED when the doc
 changed since it was written, the version it was written against, and every message.
@@ -7578,6 +7740,9 @@ changed since it was written, the version it was written against, and every mess
   --text <words>    only threads whose messages, authors or anchor contain the words
   --waiting <name>  only threads where <name> didn't write the last message \u2014 what's
                     waiting on you (e.g. --waiting claude)
+  --since <when>    only threads with a message since then: an age (30m, 2h, 3d, 1w)
+                    or a date (2026-09-26, 2026-09-26T09:00Z) \u2014 what's new since
+                    you last looked
   --vault <name>    add open/reply obsidian:// links per thread (the name is found
                     automatically when the folder has a .obsidian/ above it)
   --json            JSON instead of Markdown. A single doc gives
@@ -7587,23 +7752,24 @@ changed since it was written, the version it was written against, and every mess
 
 Examples:
   reviews list docs/designs/design.md --open
-  reviews list docs --open --vault docs`,
+  reviews list docs --open --vault docs
+  reviews list docs --since 1d`,
     run({ flags, pos }) {
       const target = pos[0];
       if (!target) fail(2, `usage: ${this.usage}`);
       const filter = { includeResolved: !(flags.open || flags.unresolved), text: flags.text };
-      const files = waitingOn(load(target, filter), flags.waiting);
+      const files = activeSince(waitingOn(load(target, filter), flags.waiting), flags.since);
       if (flags.json) return printJson(target, files);
       const vault = flags.vault ?? (vaultRootOf(target) ? basename(vaultRootOf(target)) : void 0);
       process.stdout.write(threadsDigest(files, { scope: target, filter, vault }));
     }
   },
   find: {
-    usage: "reviews find <words> [folder] [--open] [--waiting <name>] [--json]",
+    usage: "reviews find <words> [folder] [--open] [--waiting <name>] [--since <age|date>] [--json]",
     summary: "Find threads mentioning some text, across a folder (default: here)",
     help: `Case-insensitive search over message bodies, authors and what the thread is
 anchored to \u2014 the same match as the panel's search box. Resolved threads are
-included (marked "resolved") unless --open.
+included (marked "resolved") unless --open. --waiting and --since work as in list.
 
 Examples:
   reviews find frontmatter docs
@@ -7612,7 +7778,7 @@ Examples:
       const [words, target = "."] = pos;
       if (!words) fail(2, `usage: ${this.usage}`);
       const filter = { includeResolved: !flags.open, text: words };
-      const files = waitingOn(load(target, filter), flags.waiting);
+      const files = activeSince(waitingOn(load(target, filter), flags.waiting), flags.since);
       if (flags.json) return printJson(target, files);
       const vault = vaultRootOf(target) ? basename(vaultRootOf(target)) : void 0;
       process.stdout.write(threadsDigest(files, { scope: target, filter, vault }));
@@ -7635,6 +7801,44 @@ Example:
       const vault = vaultRootOf(doc) ? basename(vaultRootOf(doc)) : void 0;
       process.stdout.write(
         threadsDigest([{ ...f, threads: [t] }], { scope: `${f.path} \xB7 ${id}`, filter: { includeResolved: !!t.resolved }, vault })
+      );
+    }
+  },
+  diff: {
+    usage: "reviews diff <doc.md> <thread-id> [--json]",
+    summary: "The commented passage as the reviewer saw it, next to today's",
+    help: `Pulls the doc as the reviewer saw it from git and prints just the commented
+passage (or diagram box, arrow, image, link) then and now, so you can tell whether
+the point was already handled: changed, unchanged, or gone. Read-only; the "then"
+side needs the doc in a git clone.
+
+Example:
+  reviews diff docs/designs/design.md d1a2b3`,
+    run({ flags, pos }) {
+      const [doc, id] = pos;
+      if (!doc || !id) fail(2, `usage: ${this.usage}`);
+      const [f] = load(doc, { includeResolved: true });
+      const t = f.threads.find((x) => x.id === id);
+      if (!t) fail(3, `no thread ${id} on ${doc} (try: reviews list ${doc})`);
+      const anchor = t.anchor ?? {};
+      const git = t.rev?.git;
+      const missing = !git ? "the doc wasn't in git when the comment was written" : git.commit === WORKING_REV ? "the comment was written on uncommitted edits" : null;
+      const thenText = missing ? null : reviewedText(doc, git);
+      const why = missing ?? (thenText == null ? `git can't find ${git.commit} here` : null);
+      const then = thenText == null ? void 0 : anchorContentIn(thenText, anchor);
+      const now = existsSync(doc) ? anchorContentIn(readFileSync(doc, "utf8"), anchor) : null;
+      const state = now === null ? "gone" : then === void 0 || now === void 0 ? "unknown" : then === now ? "unchanged" : "changed";
+      if (flags.json) {
+        const out = { file: f.path, id, commit: git?.commit ?? null, state, then: then ?? null, now: now ?? null };
+        return process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+      }
+      const say = (v) => v === null ? "(not in the doc)" : v === void 0 ? "(can't pin this anchor down)" : `\u201C${v}\u201D`;
+      process.stdout.write(
+        [
+          `[${id}] ${anchorWhere(anchor)} \u2014 ${state}`,
+          `then (${git?.commit ?? "no commit"}): ${why ? `(unavailable: ${why})` : say(then)}`,
+          `now: ${say(now)}`
+        ].join("\n") + "\n"
       );
     }
   },
@@ -7680,16 +7884,18 @@ Example:
     }
   },
   reply: {
-    usage: "reviews reply <doc.md> <thread-id> <message> [--author <name>] [--vault <name>] [--dry-run]",
+    usage: "reviews reply <doc.md> <thread-id> <message> [--author <name>] [--resolve] [--vault <name>] [--dry-run]",
     summary: "Reply to a thread (through Obsidian, which stays the only writer)",
     help: `Sends obsidian://review-md-reply, so the reply is written by the plugin exactly as
 if typed in the panel. The author defaults to "claude". Checks the thread exists
 first, then waits (up to 10s) until the reply shows up in the sidecar \u2014 exit 0 means
 it landed, exit 4 means it didn't (Obsidian closed, vault not open, a dialog in the
-way). --dry-run prints the URL and sends nothing.
+way). --resolve also resolves the thread once the reply is in. --dry-run prints the
+URL and sends nothing.
 
-Example:
-  reviews reply docs/designs/design.md d1a2b3 "Moved to the sidecar in 3f82635." --author claude`,
+Examples:
+  reviews reply docs/designs/design.md d1a2b3 "Moved to the sidecar in 3f82635." --author claude
+  reviews reply docs/designs/design.md d1a2b3 "Fixed in 3f82635." --resolve`,
     run({ flags, pos }) {
       const [doc, id, ...words] = pos;
       const body = words.join(" ");
@@ -7702,7 +7908,10 @@ Example:
         url("review-md-reply", { vault, file: vaultPath(doc), thread: id, author: flags.author ?? "claude", body }),
         flags
       );
-      if (flags["dry-run"]) return;
+      if (flags["dry-run"]) {
+        if (flags.resolve) setResolved(doc, id, true, vault, flags);
+        return;
+      }
       const landed = () => {
         const t = readDoc(doc).threads.find((x) => x.id === id);
         return t && t.messages.length > before.messages.length && t.messages.at(-1).body === body;
@@ -7712,6 +7921,26 @@ Example:
       }
       process.stdout.write(`reply landed on ${id}
 `);
+      if (flags.resolve) setResolved(doc, id, true, vault, flags);
+    }
+  },
+  resolve: {
+    usage: "reviews resolve <doc.md> <thread-id> [--reopen] [--vault <name>] [--dry-run]",
+    summary: "Resolve a thread, or reopen it (through Obsidian)",
+    help: `Sends obsidian://review-md-resolve and waits (up to 10s) until the sidecar shows the
+new state \u2014 exit 0 means it's stored, exit 4 means it didn't land. Resolve a thread once
+it's answered or fixed, so it stops showing as open. --reopen opens it again.
+To answer and close in one go: reviews reply <doc> <id> "<message>" --resolve.
+
+Examples:
+  reviews resolve docs/designs/design.md d1a2b3
+  reviews resolve docs/designs/design.md d1a2b3 --reopen`,
+    run({ flags, pos }) {
+      const [doc, id] = pos;
+      if (!doc || !id) fail(2, `usage: ${this.usage}`);
+      const [f] = load(doc, { includeResolved: true });
+      if (!f.threads.some((t) => t.id === id)) fail(3, `no thread ${id} on ${doc} (try: reviews list ${doc})`);
+      setResolved(doc, id, !flags.reopen, vaultName(doc, flags), flags);
     }
   },
   help: {
@@ -7734,6 +7963,16 @@ function waitFor(check, ms) {
     }
   }
   return false;
+}
+function setResolved(doc, id, resolved, vault, flags) {
+  openUrl(url("review-md-resolve", { vault, file: vaultPath(doc), thread: id, state: resolved ? "resolved" : "open" }), flags);
+  if (flags["dry-run"]) return;
+  const landed = () => readDoc(doc).threads.find((x) => x.id === id)?.resolved === resolved;
+  if (!waitFor(landed, 1e4)) {
+    fail(4, `${id} didn't change in 10s \u2014 is Obsidian running with vault "${vault}" open, and no dialog in the way?`);
+  }
+  process.stdout.write(`${id} ${resolved ? "resolved" : "reopened"}
+`);
 }
 function vaultPath(doc) {
   const root = vaultRootOf(doc);

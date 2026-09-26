@@ -24,7 +24,10 @@ const result = await esbuild.build({
   bundle: true,
   platform: "node",
   format: "esm",
-  target: "node20",
+  target: "node18",
+  // Path comments in the bundle must not depend on the checkout: a worktree whose
+  // node_modules is a symlink would otherwise embed the link's target and fail --check.
+  preserveSymlinks: true,
   banner: {
     // esbuild keeps the entry's own #! line above this banner. yaml is CommonJS and
     // requires node builtins, which an ESM bundle can't do without a real require.

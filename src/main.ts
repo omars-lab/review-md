@@ -1018,8 +1018,20 @@ export default class ReviewMdPlugin extends Plugin {
       .filter((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path)
       .forEach((v) => {
         if (v.getMode?.() === "source") void this.scanLivePreviewMermaid(v);
-        else v.previewMode?.rerender(true);
+        else {
+          v.previewMode?.rerender(true);
+          this.rescanReadingViewSoon(v);
+        }
       });
+  }
+
+  /** After a reading-view rerender, scan for diagrams a few times while mermaid
+   *  finishes drawing. The view's watcher alone missed the redraw when the post
+   *  came from the sidebar: the new comment didn't show, and the marks already on
+   *  the diagram were wiped, until the doc tab was focused again. The scan skips
+   *  diagrams that are already marked, so extra passes cost nothing. */
+  private rescanReadingViewSoon(view: MarkdownView): void {
+    for (const ms of [50, 250, 750, 1500]) window.setTimeout(() => void this.scanReadingViewMermaid(view), ms);
   }
 
   /** Push a new thread onto the file's sidecar and return its id. When

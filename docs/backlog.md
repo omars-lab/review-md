@@ -62,9 +62,10 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
      Building it showed older threads (no passage stamp) were flagged OUTDATED on any
      edit; both the plugin and the CLI now compare the passage in the reviewed git
      version instead — see [`docs/issues/outdated-older-threads.md`](issues/outdated-older-threads.md).
-  5. **Start a thread** — `obsidian://review-md-comment?file&quote=<text>&body` +
-     `reviews comment`, so an agent can review a doc, not just answer. Medium: the plugin
-     must find the passage by quote and write the `^id` into the doc.
+  5. ~~**Start a thread**~~ — **DONE 2026-09-26.** `obsidian://review-md-comment?file&body`
+     plus one of `quote` / `node` / `from`+`to`, and `reviews comment`. `anchorForTarget`
+     in `src/pure.ts` finds the passage (or diagram box/arrow) for both, so the CLI checks
+     the target before sending; the plugin writes the `^id` as a click would.
   6. **Get data back without the clipboard** — have `review-md-export` pass the digest to
      `x-success` (e.g. `…?digest=`) for callers that can't read the clipboard. Small, but
      URL length caps it; the CLI already covers reading from a clone.

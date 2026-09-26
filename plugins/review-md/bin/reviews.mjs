@@ -7409,6 +7409,66 @@ function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 var MERMAID_SHAPES = "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
+function anchorForTarget(text, target) {
+  const norm = (s) => s.replace(/\s+/g, " ").trim();
+  if (target.node) {
+    const content = anchorContentIn(text, { type: "mermaidNode", node: target.node });
+    if (content == null) return `no diagram box "${target.node}" in the doc`;
+    const label = content.slice(target.node.length).replace(/^[[({>]+|[\])}]+$/g, "").replace(/^"(.*)"$/, "$1");
+    return { type: "mermaidNode", node: target.node, blockId: "", quote: (label || target.node).slice(0, 80) };
+  }
+  if (target.from || target.to) {
+    if (!target.from || !target.to) return "an arrow needs both ends: from and to";
+    const content = anchorContentIn(text, { type: "mermaidEdge", from: target.from, to: target.to });
+    if (content == null) return `no arrow ${target.from} \u2192 ${target.to} in the doc`;
+    return { type: "mermaidEdge", blockId: "", from: target.from, to: target.to, index: 0, quote: `${target.from} \u2192 ${target.to}` };
+  }
+  const q = norm(target.quote ?? "");
+  if (!q) return "say what to comment on: quote, node, or from and to";
+  const lines = text.split("\n");
+  let i = 0;
+  if (/^---\s*$/.test(lines[0] ?? "")) {
+    const close = lines.findIndex((l, k) => k > 0 && /^---\s*$/.test(l));
+    if (close > 0) i = close + 1;
+  }
+  let fence = false;
+  let start = -1;
+  const block = [];
+  const flush = () => {
+    if (start < 0) return null;
+    const body = norm(stripBlockIds(block.join("\n")));
+    const at = start;
+    start = -1;
+    block.length = 0;
+    const hit = body.toLowerCase().indexOf(q.toLowerCase());
+    if (hit < 0) return null;
+    const heading = body.match(/^#{1,6}\s+(.*)$/);
+    if (heading && lines[at].trim().startsWith("#")) return { type: "header", quote: norm(heading[1]).slice(0, 200), line: at };
+    return { type: "text", quote: body.slice(hit, hit + q.length).slice(0, 200), line: at };
+  };
+  for (; i <= lines.length; i++) {
+    const l = lines[i];
+    if (l === void 0 || l.trim() === "" || /^\s*`{3,}/.test(l)) {
+      const hit = flush();
+      if (hit) return hit;
+      if (l !== void 0 && /^\s*`{3,}/.test(l)) fence = !fence;
+      continue;
+    }
+    if (fence) continue;
+    if (/^#{1,6}\s/.test(l)) {
+      const hit = flush();
+      if (hit) return hit;
+      start = i;
+      block.push(l);
+      const h = flush();
+      if (h) return h;
+      continue;
+    }
+    if (start < 0) start = i;
+    block.push(l);
+  }
+  return `no passage containing "${q.slice(0, 60)}" in the doc`;
+}
 function anchorChanged(thenText, nowText, anchor) {
   const now = anchorContentIn(nowText, anchor);
   if (now === null) return true;
@@ -7669,7 +7729,7 @@ function fail(code, msg) {
   console.error(`reviews: ${msg}`);
   process.exit(code);
 }
-var VALUE_FLAGS = /* @__PURE__ */ new Set(["text", "vault", "author", "waiting", "since"]);
+var VALUE_FLAGS = /* @__PURE__ */ new Set(["text", "vault", "author", "waiting", "since", "quote", "node", "from", "to"]);
 var BOOL_FLAGS = /* @__PURE__ */ new Set(["open", "unresolved", "json", "dry-run", "help", "resolve", "reopen"]);
 function parseArgs(argv) {
   const flags = {};
@@ -7922,6 +7982,49 @@ Examples:
       process.stdout.write(`reply landed on ${id}
 `);
       if (flags.resolve) setResolved(doc, id, true, vault, flags);
+    }
+  },
+  comment: {
+    usage: "reviews comment <doc.md> <message> (--quote <words> | --node <id> | --from <id> --to <id>) [--author <name>] [--vault <name>] [--dry-run]",
+    summary: "Start a thread on a passage, diagram box or arrow (through Obsidian)",
+    help: `Sends obsidian://review-md-comment, so the plugin writes the thread exactly as if a
+reviewer had clicked there. Say what to comment on with one of:
+  --quote <words>       the first passage or heading containing these words
+  --node <id>           a diagram box, by its mermaid id
+  --from <id> --to <id> a diagram arrow
+The target is checked against the doc first (exit 3 if it isn't there). A passage gets
+a ^id written at its end, as when commenting by hand. Waits (up to 10s) for the thread
+to show up in the comments file and prints its id; exit 4 means it didn't land. The
+author defaults to "claude". --dry-run prints the URL and sends nothing.
+
+Examples:
+  reviews comment docs/designs/design.md "Say what happens on timeout." --quote "retries the export"
+  reviews comment docs/designs/design.md "Who owns this box?" --node Plugin
+  reviews comment docs/designs/design.md "Is this sync or async?" --from Plugin --to Sidecar`,
+    run({ flags, pos }) {
+      const [doc, ...words] = pos;
+      const body = words.join(" ");
+      if (!doc || !body) fail(2, `usage: ${this.usage}`);
+      if (!existsSync(doc)) fail(3, `no such doc: ${doc}`);
+      const target = { quote: flags.quote, node: flags.node, from: flags.from, to: flags.to };
+      if (!target.quote && !target.node && !target.from && !target.to) fail(2, `say what to comment on \u2014 usage: ${this.usage}`);
+      if (!!target.from !== !!target.to) fail(2, "an arrow needs both --from and --to");
+      const anchor = anchorForTarget(readFileSync(doc, "utf8"), target);
+      if (typeof anchor === "string") fail(3, anchor);
+      const vault = vaultName(doc, flags);
+      const params = { vault, file: vaultPath(doc), author: flags.author ?? "claude", body };
+      for (const k of ["quote", "node", "from", "to"]) if (target[k]) params[k] = target[k];
+      const ids = () => existsSync(sidecarPathFor(doc)) ? readDoc(doc).threads.map((t) => t.id) : [];
+      const before = new Set(ids());
+      openUrl(url("review-md-comment", params), flags);
+      if (flags["dry-run"]) return;
+      let started;
+      const landed = () => started = ids().find((id) => !before.has(id));
+      if (!waitFor(landed, 1e4)) {
+        fail(4, `the thread didn't land in 10s \u2014 is Obsidian running with vault "${vault}" open, and no dialog in the way?`);
+      }
+      process.stdout.write(`${started} started on ${anchorWhere(anchor)}
+`);
     }
   },
   resolve: {

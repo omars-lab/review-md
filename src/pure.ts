@@ -151,6 +151,91 @@ export function escapeRegExp(s: string): string {
 export const MERMAID_SHAPES =
   "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
 
+/** What a new comment points at, from outside Obsidian: a passage by some of its
+ *  words, a diagram box by id, or an arrow by its two ends. */
+export interface CommentTarget {
+  quote?: string;
+  node?: string;
+  from?: string;
+  to?: string;
+}
+
+/**
+ * Build a thread anchor for a new comment from a CommentTarget, checked against
+ * the doc's text (`text`, the whole file) — the same anchor shape a click in
+ * Obsidian makes, so the thread behaves the same afterwards. A quote picks the first
+ * paragraph (or heading) that contains it, outside code fences, and records that
+ * block's first line so the plugin can place a `^id` on it. Returns a plain-words
+ * error string when the target isn't in the doc.
+ */
+export function anchorForTarget(text: string, target: CommentTarget): Record<string, unknown> | string {
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+  if (target.node) {
+    const content = anchorContentIn(text, { type: "mermaidNode", node: target.node });
+    if (content == null) return `no diagram box "${target.node}" in the doc`;
+    const label = content
+      .slice(target.node.length)
+      .replace(/^[[({>]+|[\])}]+$/g, "")
+      .replace(/^"(.*)"$/, "$1");
+    return { type: "mermaidNode", node: target.node, blockId: "", quote: (label || target.node).slice(0, 80) };
+  }
+  if (target.from || target.to) {
+    if (!target.from || !target.to) return "an arrow needs both ends: from and to";
+    const content = anchorContentIn(text, { type: "mermaidEdge", from: target.from, to: target.to });
+    if (content == null) return `no arrow ${target.from} → ${target.to} in the doc`;
+    return { type: "mermaidEdge", blockId: "", from: target.from, to: target.to, index: 0, quote: `${target.from} → ${target.to}` };
+  }
+  const q = norm(target.quote ?? "");
+  if (!q) return "say what to comment on: quote, node, or from and to";
+  // Walk the file's blocks (runs of non-blank lines), skipping frontmatter and fences.
+  const lines = text.split("\n");
+  let i = 0;
+  if (/^---\s*$/.test(lines[0] ?? "")) {
+    const close = lines.findIndex((l, k) => k > 0 && /^---\s*$/.test(l));
+    if (close > 0) i = close + 1;
+  }
+  let fence = false;
+  let start = -1;
+  const block: string[] = [];
+  const flush = (): Record<string, unknown> | null => {
+    if (start < 0) return null;
+    const body = norm(stripBlockIds(block.join("\n")));
+    const at = start;
+    start = -1;
+    block.length = 0;
+    // Case-insensitive match; the quote keeps the doc's own spelling, like a
+    // reviewer selecting those words.
+    const hit = body.toLowerCase().indexOf(q.toLowerCase());
+    if (hit < 0) return null;
+    const heading = body.match(/^#{1,6}\s+(.*)$/);
+    if (heading && lines[at].trim().startsWith("#")) return { type: "header", quote: norm(heading[1]).slice(0, 200), line: at };
+    return { type: "text", quote: body.slice(hit, hit + q.length).slice(0, 200), line: at };
+  };
+  for (; i <= lines.length; i++) {
+    const l = lines[i];
+    if (l === undefined || l.trim() === "" || /^\s*`{3,}/.test(l)) {
+      const hit = flush();
+      if (hit) return hit;
+      if (l !== undefined && /^\s*`{3,}/.test(l)) fence = !fence;
+      continue;
+    }
+    if (fence) continue;
+    // A heading is a block of its own, even with no blank line after it.
+    if (/^#{1,6}\s/.test(l)) {
+      const hit = flush();
+      if (hit) return hit;
+      start = i;
+      block.push(l);
+      const h = flush();
+      if (h) return h;
+      continue;
+    }
+    if (start < 0) start = i;
+    block.push(l);
+  }
+  return `no passage containing "${q.slice(0, 60)}" in the doc`;
+}
+
 /**
  * Did the commented thing change between the doc the reviewer saw (`thenText`) and
  * today's (`nowText`)? The staleness check for threads with no passage stamp

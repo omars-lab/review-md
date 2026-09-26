@@ -28,6 +28,7 @@ import {
   anchorContentIn,
   anchorChanged,
   anchorWhere,
+  anchorForTarget,
   WORKING_REV,
 } from "../src/pure.ts";
 
@@ -154,7 +155,7 @@ function fail(code, msg) {
 
 // ---- Argument parsing: positionals + a fixed set of flags per command.
 
-const VALUE_FLAGS = new Set(["text", "vault", "author", "waiting", "since"]);
+const VALUE_FLAGS = new Set(["text", "vault", "author", "waiting", "since", "quote", "node", "from", "to"]);
 const BOOL_FLAGS = new Set(["open", "unresolved", "json", "dry-run", "help", "resolve", "reopen"]);
 
 function parseArgs(argv) {
@@ -432,6 +433,50 @@ Examples:
       }
       process.stdout.write(`reply landed on ${id}\n`);
       if (flags.resolve) setResolved(doc, id, true, vault, flags);
+    },
+  },
+
+  comment: {
+    usage:
+      "reviews comment <doc.md> <message> (--quote <words> | --node <id> | --from <id> --to <id>) [--author <name>] [--vault <name>] [--dry-run]",
+    summary: "Start a thread on a passage, diagram box or arrow (through Obsidian)",
+    help: `Sends obsidian://review-md-comment, so the plugin writes the thread exactly as if a
+reviewer had clicked there. Say what to comment on with one of:
+  --quote <words>       the first passage or heading containing these words
+  --node <id>           a diagram box, by its mermaid id
+  --from <id> --to <id> a diagram arrow
+The target is checked against the doc first (exit 3 if it isn't there). A passage gets
+a ^id written at its end, as when commenting by hand. Waits (up to 10s) for the thread
+to show up in the comments file and prints its id; exit 4 means it didn't land. The
+author defaults to "claude". --dry-run prints the URL and sends nothing.
+
+Examples:
+  reviews comment docs/designs/design.md "Say what happens on timeout." --quote "retries the export"
+  reviews comment docs/designs/design.md "Who owns this box?" --node Plugin
+  reviews comment docs/designs/design.md "Is this sync or async?" --from Plugin --to Sidecar`,
+    run({ flags, pos }) {
+      const [doc, ...words] = pos;
+      const body = words.join(" ");
+      if (!doc || !body) fail(2, `usage: ${this.usage}`);
+      if (!existsSync(doc)) fail(3, `no such doc: ${doc}`);
+      const target = { quote: flags.quote, node: flags.node, from: flags.from, to: flags.to };
+      if (!target.quote && !target.node && !target.from && !target.to) fail(2, `say what to comment on — usage: ${this.usage}`);
+      if (!!target.from !== !!target.to) fail(2, "an arrow needs both --from and --to");
+      const anchor = anchorForTarget(readFileSync(doc, "utf8"), target);
+      if (typeof anchor === "string") fail(3, anchor);
+      const vault = vaultName(doc, flags);
+      const params = { vault, file: vaultPath(doc), author: flags.author ?? "claude", body };
+      for (const k of ["quote", "node", "from", "to"]) if (target[k]) params[k] = target[k];
+      const ids = () => (existsSync(sidecarPathFor(doc)) ? readDoc(doc).threads.map((t) => t.id) : []);
+      const before = new Set(ids());
+      openUrl(url("review-md-comment", params), flags);
+      if (flags["dry-run"]) return;
+      let started;
+      const landed = () => (started = ids().find((id) => !before.has(id)));
+      if (!waitFor(landed, 10_000)) {
+        fail(4, `the thread didn't land in 10s — is Obsidian running with vault "${vault}" open, and no dialog in the way?`);
+      }
+      process.stdout.write(`${started} started on ${anchorWhere(anchor)}\n`);
     },
   },
 

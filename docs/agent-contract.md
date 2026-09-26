@@ -111,8 +111,8 @@ no such thread, `4` Obsidian didn't take it (`reply` waits up to 10s for the mes
 `review-setup` should verify, PASS/FAIL:
 
 - [ ] The `review-md` plugin is installed and enabled in the target vault.
-- [ ] `obsidian://review-md-open`, `obsidian://review-md-reply` and
-      `obsidian://review-md-resolve` resolve (the
+- [ ] `obsidian://review-md-open`, `obsidian://review-md-reply`,
+      `obsidian://review-md-resolve` and `obsidian://review-md-comment` resolve (the
       x-callback actions the reviewer/agent round-trip on).
 - [ ] For each reviewed file that has comments, its sidecar
       `<dir>/.<name>.comments.md` exists and `npm run reviews -- list <file> --json`

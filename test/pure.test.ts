@@ -28,6 +28,7 @@ import {
   bodyHash,
   anchorContentIn,
   anchorChanged,
+  anchorForTarget,
   ordinalsFromLog,
   revKeyOf,
   revLabelFor,
@@ -571,4 +572,24 @@ test("anchorChanged: compares the commented passage in the reviewed and current 
   assert.equal(anchorChanged(then, "Intro. ^a\n\nThe new claim. ^b\n", anchor), true);
   assert.equal(anchorChanged(then, "Intro. ^a\n", anchor), true); // gone
   assert.equal(anchorChanged(then, then, { type: "text" }), undefined); // can't pin down
+});
+
+test("anchorForTarget: a quote finds its paragraph or heading, outside fences", () => {
+  const doc = "---\nt: 1\n---\n# Title\nIntro line one\nline two. ^x\n\n```js\nconst needle = 1;\n```\n\nThe needle is here.\n";
+  assert.deepEqual(anchorForTarget(doc, { quote: "line   two" }), { type: "text", quote: "line two", line: 4 });
+  assert.deepEqual(anchorForTarget(doc, { quote: "needle" }), { type: "text", quote: "needle", line: 11 });
+  assert.deepEqual(anchorForTarget(doc, { quote: "THE NEEDLE" }), { type: "text", quote: "The needle", line: 11 });
+  assert.deepEqual(anchorForTarget(doc, { quote: "Title" }), { type: "header", quote: "Title", line: 3 });
+  assert.match(anchorForTarget(doc, { quote: "t: 1" }) as string, /no passage/);
+  assert.match(anchorForTarget(doc, {}) as string, /say what to comment on/);
+});
+
+test("anchorForTarget: diagram boxes and arrows must exist", () => {
+  const doc = "```mermaid\nflowchart LR\n  A[\"Start here\"] --> B(Next)\n```\n";
+  assert.deepEqual(anchorForTarget(doc, { node: "A" }), { type: "mermaidNode", node: "A", blockId: "", quote: "Start here" });
+  assert.deepEqual(anchorForTarget(doc, { node: "B" }), { type: "mermaidNode", node: "B", blockId: "", quote: "Next" });
+  assert.match(anchorForTarget(doc, { node: "Z" }) as string, /no diagram box/);
+  assert.equal((anchorForTarget(doc, { from: "A", to: "B" }) as { quote: string }).quote, "A → B");
+  assert.match(anchorForTarget(doc, { from: "B", to: "A" }) as string, /no arrow/);
+  assert.match(anchorForTarget(doc, { from: "A" }) as string, /both ends/);
 });

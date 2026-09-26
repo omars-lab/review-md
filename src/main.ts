@@ -565,7 +565,11 @@ export default class ReviewMdPlugin extends Plugin {
       const start = Number(sec.dataset.reviewMdLineStart);
       const end = Number(sec.dataset.reviewMdLineEnd);
       const ids = [...lines].filter(([l]) => l >= start && l <= end).flatMap(([, t]) => t);
-      if ((sec.dataset.reviewMdThreads ?? "") === ids.join(",")) continue;
+      // Skip only when the ids match AND the button is still there: Obsidian can
+      // re-render a section's children while keeping the element (and its data),
+      // which dropped the button but left the bar.
+      const hasMark = !!sec.querySelector(":scope > .review-md-passage-mark");
+      if ((sec.dataset.reviewMdThreads ?? "") === ids.join(",") && (hasMark || !ids.length)) continue;
       sec.querySelector(":scope > .review-md-passage-mark")?.remove();
       if (!ids.length) {
         delete sec.dataset.reviewMdThreads;

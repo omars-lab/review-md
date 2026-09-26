@@ -32,6 +32,8 @@ rather than guessing flags.
    spoke last. Add `--json` to work through them one by one; each file's `file` is the
    path on disk to pass back to `show`/`reply`.
    Looking for one topic: `reviews find "<words>" <folder> --open`.
+   Checking back later: add `--since 2h` (or a date) to see only threads with new
+   messages since then.
 3. **Act on each thread.** Read the anchor (what the thread points at — a passage, a
    diagram node or edge, an image, a link) and the messages. Then change the doc, or
    answer the question. **OUTDATED** means the doc changed since the thread was

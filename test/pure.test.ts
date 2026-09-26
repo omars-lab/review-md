@@ -39,6 +39,7 @@ import {
   latestTs,
   anchorLineIn,
   commentedLines,
+  sinceCutoff,
   startsFolded,
   FOLD_OVER,
   anchorWhere,
@@ -451,6 +452,16 @@ test("anchorLineIn image and link: the source line, image by file name when src 
   assert.equal(anchorLineIn(BODY, { type: "link", href: "docs/api/index.md" }), 19);
   assert.equal(anchorLineIn(BODY, { type: "link", href: "https://elsewhere", quote: "the API" }), 19);
   assert.equal(anchorLineIn(BODY, { type: "mystery" }), null);
+});
+
+test("sinceCutoff: ages count back from now, dates parse, junk is null", () => {
+  const now = Date.parse("2026-09-26T12:00:00Z");
+  assert.equal(sinceCutoff("30m", now), now - 30 * 60_000);
+  assert.equal(sinceCutoff("2h", now), Date.parse("2026-09-26T10:00:00Z"));
+  assert.equal(sinceCutoff("3D", now), Date.parse("2026-09-23T12:00:00Z"));
+  assert.equal(sinceCutoff("1w", now), Date.parse("2026-09-19T12:00:00Z"));
+  assert.equal(sinceCutoff("2026-09-25T09:00:00Z", now), Date.parse("2026-09-25T09:00:00Z"));
+  assert.equal(sinceCutoff("yesterday", now), null);
 });
 
 test("commentedLines: open passage threads by line, diagrams and resolved left out", () => {

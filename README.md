@@ -273,6 +273,7 @@ Obsidian, so the plugin stays the only thing that writes them. With the
 reviews help                                   # every command, with examples
 reviews stats docs                             # where is feedback waiting?
 reviews list docs --open --waiting claude      # open threads waiting on claude
+reviews list docs --since 1d                   # threads with a message in the last day
 reviews find "frontmatter" docs                # threads mentioning some words
 reviews show docs/designs/design.md d1a2b3     # one thread in full
 reviews reply docs/designs/design.md d1a2b3 "Fixed in abc123." --author claude

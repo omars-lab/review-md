@@ -445,6 +445,19 @@ export function anchorLineIn(body: string, anchor: Record<string, unknown>): num
   }
 }
 
+/** The cutoff for `reviews … --since`: an age like `30m`, `2h`, `3d`, `1w`
+ *  (counted back from `now`), or any date `Date.parse` reads, e.g. `2026-09-26`
+ *  or `2026-09-26T09:00Z`. Epoch ms, or null when the text is neither. */
+export function sinceCutoff(spec: string, now: number): number | null {
+  const age = spec.trim().match(/^(\d+)\s*([mhdw])$/i);
+  if (age) {
+    const unit = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }[age[2].toLowerCase() as "m"];
+    return now - Number(age[1]) * unit;
+  }
+  const at = Date.parse(spec);
+  return Number.isNaN(at) ? null : at;
+}
+
 /** Which source lines carry open comments, for the mark beside a commented
  *  passage. Line (0-based, in `text` as given) → thread ids, in thread order.
  *  Diagram threads are left out: diagrams mark their own nodes and arrows. */

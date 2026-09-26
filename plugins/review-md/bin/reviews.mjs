@@ -7400,6 +7400,28 @@ function threadMatches(t, query) {
   const q = query.trim().toLowerCase();
   return !q || threadSearchText(t).includes(q);
 }
+function latestTs(t) {
+  let max = 0;
+  for (const m of t.messages) {
+    const n = Date.parse(m.ts);
+    if (!Number.isNaN(n) && n > max) max = n;
+  }
+  if (max === 0) {
+    const ts = t.rev?.ts;
+    const n = typeof ts === "string" ? Date.parse(ts) : NaN;
+    if (!Number.isNaN(n)) max = n;
+  }
+  return max;
+}
+function sinceCutoff(spec, now) {
+  const age = spec.trim().match(/^(\d+)\s*([mhdw])$/i);
+  if (age) {
+    const unit = { m: 6e4, h: 36e5, d: 864e5, w: 6048e5 }[age[2].toLowerCase()];
+    return now - Number(age[1]) * unit;
+  }
+  const at = Date.parse(spec);
+  return Number.isNaN(at) ? null : at;
+}
 function anchorWhere(anchor = {}) {
   const s = (v, max) => String(v ?? "").replace(/\s+/g, " ").slice(0, max);
   switch (anchor.type) {
@@ -7524,11 +7546,17 @@ function waitingOn(files, author) {
     threads: f.threads.filter((t) => (t.messages.at(-1)?.author ?? "").toLowerCase() !== who)
   }));
 }
+function activeSince(files, since) {
+  if (!since) return files;
+  const cutoff = sinceCutoff(since, Date.now());
+  if (cutoff === null) fail(2, `--since wants an age like 2h or 3d, or a date like 2026-09-26 (got "${since}")`);
+  return files.map((f) => ({ ...f, threads: f.threads.filter((t) => latestTs(t) > cutoff) }));
+}
 function fail(code, msg) {
   console.error(`reviews: ${msg}`);
   process.exit(code);
 }
-var VALUE_FLAGS = /* @__PURE__ */ new Set(["text", "vault", "author", "waiting"]);
+var VALUE_FLAGS = /* @__PURE__ */ new Set(["text", "vault", "author", "waiting", "since"]);
 var BOOL_FLAGS = /* @__PURE__ */ new Set(["open", "unresolved", "json", "dry-run", "help"]);
 function parseArgs(argv) {
   const flags = {};
@@ -7569,7 +7597,7 @@ function openUrl(url2, flags) {
 var url = (action, params) => `obsidian://${action}?${new URLSearchParams(params).toString().replace(/\+/g, "%20")}`;
 var COMMANDS = {
   list: {
-    usage: "reviews list <doc.md | folder> [--open] [--text <words>] [--waiting <name>] [--vault <name>] [--json]",
+    usage: "reviews list <doc.md | folder> [--open] [--text <words>] [--waiting <name>] [--since <age|date>] [--vault <name>] [--json]",
     summary: "Print the threads on a doc, or every doc under a folder",
     help: `Prints each thread: where it's anchored, open/resolved, OUTDATED when the doc
 changed since it was written, the version it was written against, and every message.
@@ -7578,6 +7606,9 @@ changed since it was written, the version it was written against, and every mess
   --text <words>    only threads whose messages, authors or anchor contain the words
   --waiting <name>  only threads where <name> didn't write the last message \u2014 what's
                     waiting on you (e.g. --waiting claude)
+  --since <when>    only threads with a message since then: an age (30m, 2h, 3d, 1w)
+                    or a date (2026-09-26, 2026-09-26T09:00Z) \u2014 what's new since
+                    you last looked
   --vault <name>    add open/reply obsidian:// links per thread (the name is found
                     automatically when the folder has a .obsidian/ above it)
   --json            JSON instead of Markdown. A single doc gives
@@ -7587,23 +7618,24 @@ changed since it was written, the version it was written against, and every mess
 
 Examples:
   reviews list docs/designs/design.md --open
-  reviews list docs --open --vault docs`,
+  reviews list docs --open --vault docs
+  reviews list docs --since 1d`,
     run({ flags, pos }) {
       const target = pos[0];
       if (!target) fail(2, `usage: ${this.usage}`);
       const filter = { includeResolved: !(flags.open || flags.unresolved), text: flags.text };
-      const files = waitingOn(load(target, filter), flags.waiting);
+      const files = activeSince(waitingOn(load(target, filter), flags.waiting), flags.since);
       if (flags.json) return printJson(target, files);
       const vault = flags.vault ?? (vaultRootOf(target) ? basename(vaultRootOf(target)) : void 0);
       process.stdout.write(threadsDigest(files, { scope: target, filter, vault }));
     }
   },
   find: {
-    usage: "reviews find <words> [folder] [--open] [--waiting <name>] [--json]",
+    usage: "reviews find <words> [folder] [--open] [--waiting <name>] [--since <age|date>] [--json]",
     summary: "Find threads mentioning some text, across a folder (default: here)",
     help: `Case-insensitive search over message bodies, authors and what the thread is
 anchored to \u2014 the same match as the panel's search box. Resolved threads are
-included (marked "resolved") unless --open.
+included (marked "resolved") unless --open. --waiting and --since work as in list.
 
 Examples:
   reviews find frontmatter docs
@@ -7612,7 +7644,7 @@ Examples:
       const [words, target = "."] = pos;
       if (!words) fail(2, `usage: ${this.usage}`);
       const filter = { includeResolved: !flags.open, text: words };
-      const files = waitingOn(load(target, filter), flags.waiting);
+      const files = activeSince(waitingOn(load(target, filter), flags.waiting), flags.since);
       if (flags.json) return printJson(target, files);
       const vault = vaultRootOf(target) ? basename(vaultRootOf(target)) : void 0;
       process.stdout.write(threadsDigest(files, { scope: target, filter, vault }));

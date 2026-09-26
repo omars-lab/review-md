@@ -30,11 +30,15 @@ plugin could only be installed through BRAT or a source build.
    `require`s node builtins. Inside an ESM bundle that throws at startup. Fix: the
    bundle's banner defines a real `require` with `createRequire(import.meta.url)`.
    It's verified by running the bundle from outside the repo on Node 18.19.
-2. **The plugin's `bin/` wasn't on PATH.** The docs say files in a plugin's `bin/`
-   are added to the Bash tool's PATH. On Claude Code 2.1.283 with `--plugin-dir`,
-   `command -v reviews` found nothing (exit 127). `${CLAUDE_PLUGIN_ROOT}` *is* filled
-   in inside SKILL.md, so the skill now names the full path,
-   `${CLAUDE_PLUGIN_ROOT}/bin/reviews`, and doesn't rely on PATH. We checked it end to
-   end: a fresh `claude -p --plugin-dir plugins/review-md` session used the skill, ran
-   the bundled CLI and listed the right waiting thread. The `bin/reviews` shell wrapper
-   stays, for when PATH does work.
+2. **The plugin `bin/` looked off PATH, but we had loaded the plugin the wrong way.** The
+   docs say a plugin's `bin/` goes on the Bash tool's PATH while the plugin is enabled.
+   The first test loaded it with `claude -p --plugin-dir plugins/review-md`, and
+   `command -v reviews` found nothing (exit 127). That load runs the skills (and
+   `${CLAUDE_PLUGIN_ROOT}` is filled in), but it does **not** put `bin/` on PATH: that
+   session's PATH had every *installed* plugin's `bin/`, but not this one. Installed
+   for real (`claude plugin marketplace add <repo>` → `claude plugin install
+   review-md@review-md`), a fresh session found `reviews` on PATH and `reviews stats docs`
+   worked. So the skill says `reviews` and falls back to
+   `${CLAUDE_PLUGIN_ROOT}/bin/reviews` when it isn't on PATH (e.g. under `--plugin-dir`).
+   Lesson: test a plugin by installing it from a local marketplace, not only with
+   `--plugin-dir`.

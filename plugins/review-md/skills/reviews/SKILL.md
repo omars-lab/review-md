@@ -17,8 +17,9 @@ review-md keeps each doc's comment threads in a git-tracked file next to it
 and answers through Obsidian, so the Obsidian plugin stays the only thing that writes
 them.
 
-Below, `reviews` means **`${CLAUDE_PLUGIN_ROOT}/bin/reviews`** — run it by that full
-path (don't count on it being on PATH). It needs only Node 18+. `reviews help` lists
+`reviews` is on PATH while this plugin is installed and enabled. If the shell can't
+find it (e.g. the plugin was loaded with `--plugin-dir`), run it by its full path,
+`${CLAUDE_PLUGIN_ROOT}/bin/reviews`. It needs only Node 18+. `reviews help` lists
 the commands and `reviews help <command>` gives flags and examples — check the help
 rather than guessing flags.
 

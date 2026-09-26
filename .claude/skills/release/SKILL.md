@@ -40,9 +40,12 @@ from `main`.**
    uploads the five assets to the release.
 6. **Prove it:** `gh release view <x.y.z>` should list all five assets. Then
    `make setup-verify VAULT=<name>` against a BRAT vault (see the `setup-review-md`
-   skill). For the Claude plugin, run
-   `claude plugin validate .` and, in a scratch session,
-   `claude -p --plugin-dir plugins/review-md "use the review-md:reviews skill to run reviews stats docs"`.
+   skill). For the Claude plugin, install it the way users do, then remove it:
+   `claude plugin marketplace add omars-lab/review-md` →
+   `claude plugin install review-md@review-md` →
+   `claude -p "run: command -v reviews && reviews stats docs"` →
+   `claude plugin uninstall review-md@review-md` →
+   `claude plugin marketplace remove review-md`.
 
 ## Gotchas
 
@@ -51,7 +54,8 @@ from `main`.**
 - `plugins/review-md/bin/reviews.mjs` is committed, so edits to `scripts/reviews.mjs`
   or `src/pure.ts` need `make cli`. The pre-commit hook and `make check` catch a stale
   bundle.
-- The skill calls `${CLAUDE_PLUGIN_ROOT}/bin/reviews` by its full path; on Claude Code
-  2.1.283 the plugin `bin/` wasn't on PATH (see `docs/issues/packaging.md`).
+- Test the plugin by installing it, not only with `--plugin-dir`. That flag runs the
+  skills but doesn't put `bin/` on PATH, so `reviews` looks missing when it isn't (see
+  `docs/issues/packaging.md`).
 - Never force-move or delete a published tag: BRAT users have already pulled it. Fix
   forward with the next patch version.

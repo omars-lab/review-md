@@ -95,8 +95,8 @@ rationale.
   agent (`claude`) reply in order (⌘/Ctrl+Enter posts, bodies render as Markdown), and
   **Resolve** closes it. Your reviewer name is a setting.
 - 🔗 **Share & reply by link** — any thread emits an `obsidian://review-md-open?…&thread=…`
-  URL; a reply URL reopens the file focused on that thread. Full API in
-  [`docs/api/xcallback.md`](docs/api/xcallback.md).
+  URL; a reply URL reopens the file focused on that thread. Every URL is in the
+  [API reference](#every-url-in-one-spec).
 - 🧭 **Mermaid comment badges** — threads on a diagram render as recoloured nodes and
   `💬`/count/`✓` badges hung off the diagram **without editing its source**; a **Bake**
   command can fold them in on demand.
@@ -141,6 +141,25 @@ An `obsidian://review-md-open` link opens the file focused on a thread; a
 <p align="center">
   <img src="docs/media/deeplink.gif" alt="Firing obsidian://review-md-open and review-md-reply deep links" width="420">
 </p>
+
+### Every URL in one spec
+
+Open, reply, resolve, comment and export are described in an OpenAPI spec, so you can
+browse them in Swagger UI, including every parameter and an example URL for each.
+Click the picture to open the live spec:
+
+<p align="center">
+  <a href="https://petstore.swagger.io/?url=https://raw.githubusercontent.com/omars-lab/review-md/main/docs/api/xcallback.openapi.json">
+    <img src="docs/media/api-swagger.png" alt="The review-md x-callback URL API in Swagger UI: open, reply, resolve, comment and export" width="720">
+  </a>
+</p>
+
+Same spec, other forms: [`docs/api/xcallback.md`](docs/api/xcallback.md) as plain
+tables, and [`docs/api/xcallback.openapi.json`](docs/api/xcallback.openapi.json) for
+any OpenAPI tool. All three are generated from one file,
+[`src/protocol/xcallback.schema.json`](src/protocol/xcallback.schema.json), which the
+plugin also uses to register its URL handlers. A commit that leaves them out of step with
+that file is refused.
 
 ### A comment thread
 

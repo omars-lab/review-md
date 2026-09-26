@@ -1,6 +1,6 @@
 {
   "name": "review-md",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Click-to-comment markdown review tool for Obsidian: anchored comment threads stored in a git-tracked sidecar, shareable and repliable via obsidian:// x-callback URLs.",
   "type": "module",
   "private": true,

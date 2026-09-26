@@ -29,6 +29,7 @@ import {
   ordinalsFromLog,
   mermaidBlocksFrom,
   anchorContentIn,
+  anchorChanged,
   escapeRegExp,
   MERMAID_SHAPES,
   effectiveReviewer,
@@ -1364,9 +1365,11 @@ export default class ReviewMdPlugin extends Plugin {
    * anchors to changed or was removed since it was authored — an edit to an
    * unrelated part of the file leaves it current (Omar, 2026-09-21: "unless on our
    * latest, we removed content"). When the thread carries an `anchorHash` we compare
-   * against just its anchored content now; if that content can't be extracted we
-   * fall back to the coarse whole-body `bodyHash`. Threads with no `rev` (e.g.
-   * seeded fixtures) are never outdated.
+   * against just its anchored content now. Older threads have no `anchorHash`; for
+   * those we compare the anchored content in the git version the reviewer saw with
+   * today's (`anchorChanged`). Only when neither works do we fall back to the coarse
+   * whole-body `bodyHash`. Threads with no `rev` (e.g. seeded fixtures) are never
+   * outdated. The `reviews` CLI applies the same order (scripts/reviews.mjs).
    */
   async isThreadOutdated(file: TFile, thread: ReviewThread): Promise<boolean> {
     const rev = thread.rev;
@@ -1375,10 +1378,32 @@ export default class ReviewMdPlugin extends Plugin {
       const content = await this.anchorContentFor(file, thread.anchor);
       if (content === null) return true; // the anchored target is gone
       if (typeof content === "string") return (await sha256Short(content)) !== rev.anchorHash;
-      // content === undefined: can't extract precisely → fall through to bodyHash
+      // content === undefined: can't extract precisely → fall through
+    }
+    const commit = rev.git?.commit;
+    if (commit && commit !== WORKING_REV) {
+      const then = await this.reviewedBody(file, commit);
+      if (then !== null) {
+        const now = stripFrontmatter(await this.app.vault.read(file));
+        const changed = anchorChanged(then, now, thread.anchor);
+        if (changed !== undefined) return changed;
+      }
     }
     if (!rev.bodyHash) return false;
     return (await this.bodyHashFor(file)) !== rev.bodyHash;
+  }
+
+  /** bodyAtRevision, remembered: a commit's content never changes, and every render
+   *  of the sidebar asks again for each older thread. */
+  private reviewedBodies = new Map<string, Promise<string | null>>();
+  private reviewedBody(file: TFile, commit: string): Promise<string | null> {
+    const key = `${file.path}\0${commit}`;
+    let p = this.reviewedBodies.get(key);
+    if (!p) {
+      p = this.bodyAtRevision(file, commit);
+      this.reviewedBodies.set(key, p);
+    }
+    return p;
   }
 
   /**

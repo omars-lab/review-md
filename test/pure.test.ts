@@ -27,6 +27,7 @@ import {
   sha256Short,
   bodyHash,
   anchorContentIn,
+  anchorChanged,
   ordinalsFromLog,
   revKeyOf,
   revLabelFor,
@@ -561,4 +562,13 @@ test("anchorContentIn: diagram boxes and arrows read from mermaid fences only", 
   assert.equal(anchorContentIn(doc, { type: "mermaidNode", node: "C" }), null);
   assert.equal(anchorContentIn(doc, { type: "mermaidEdge", from: "A", to: "B" }), "A[Start] --> B");
   assert.equal(anchorContentIn(doc, { type: "mermaidEdge", from: "B", to: "A" }), null);
+});
+
+test("anchorChanged: compares the commented passage in the reviewed and current docs", () => {
+  const then = "Intro. ^a\n\nThe claim. ^b\n";
+  const anchor = { type: "text", blockId: "b" };
+  assert.equal(anchorChanged(then, "Intro, rewritten. ^a\n\nThe claim. ^b\n", anchor), false);
+  assert.equal(anchorChanged(then, "Intro. ^a\n\nThe new claim. ^b\n", anchor), true);
+  assert.equal(anchorChanged(then, "Intro. ^a\n", anchor), true); // gone
+  assert.equal(anchorChanged(then, then, { type: "text" }), undefined); // can't pin down
 });

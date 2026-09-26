@@ -38,8 +38,8 @@ rather than guessing flags.
    diagram node or edge, an image, a link) and the messages. Then change the doc, or
    answer the question. **OUTDATED** means the commented passage changed since the
    thread was written (`now reads:` shows it today) — the point may already be handled.
-   Older threads without a passage stamp go OUTDATED on any edit to the doc.
-   `reviewed against: <commit>` shows what the reviewer saw: `git show <commit>:<path>`.
+   `reviews diff <doc.md> <id>` prints the passage as the reviewer saw it next to
+   today's (`changed` / `unchanged` / `gone`).
 4. **Reply on the thread** with what you did, naming the commit if you changed the doc:
    `reviews reply <doc.md> <id> "Reworded in abc123 — …" --author claude`.
    It waits until the reply is in the comments file: `reply landed on <id>` (exit 0)

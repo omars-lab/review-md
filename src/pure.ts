@@ -152,6 +152,24 @@ export const MERMAID_SHAPES =
   "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
 
 /**
+ * Did the commented thing change between the doc the reviewer saw (`thenText`) and
+ * today's (`nowText`)? The staleness check for threads with no passage stamp
+ * (`anchorHash`) — older threads — when git still has the reviewed version: much
+ * finer than "did the doc change anywhere". `undefined` when it can't tell.
+ */
+export function anchorChanged(
+  thenText: string,
+  nowText: string,
+  anchor: Record<string, unknown>,
+): boolean | undefined {
+  const now = anchorContentIn(nowText, anchor);
+  if (now === null) return true;
+  const then = anchorContentIn(thenText, anchor);
+  if (then == null || now === undefined) return undefined;
+  return then !== now;
+}
+
+/**
  * Just the content a thread points at, as it reads in `text` (the whole file) today —
  * what the per-passage staleness check hashes, and what "now reads" shows. Shared
  * by the plugin and the `reviews` CLI so both call the same threads outdated.

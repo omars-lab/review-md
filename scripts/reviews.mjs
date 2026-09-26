@@ -26,6 +26,9 @@ import {
   latestTs,
   sinceCutoff,
   anchorContentIn,
+  anchorChanged,
+  anchorWhere,
+  WORKING_REV,
 } from "../src/pure.ts";
 
 // ---- Hashing: the plugin's sha256Short/bodyHash (src/pure.ts) are async Web Crypto;
@@ -38,18 +41,25 @@ function bodyHash(text) {
 }
 
 /** Is a thread outdated, and what does its passage say today? The plugin's rule
- *  (isThreadOutdated): compare just the anchored passage / box / arrow / image when
- *  the thread carries an anchorHash, so an edit elsewhere in the doc leaves it
- *  current; otherwise fall back to the whole-doc hash. `current` is the anchored
- *  text today (null when it's gone), for the digest's "now reads". */
-function staleness(t, text) {
+ *  (isThreadOutdated), most precise first: the passage stamp (anchorHash); else the
+ *  passage in the git version the reviewer saw vs today's; else the whole-doc hash.
+ *  So an edit elsewhere in the doc leaves a thread current. `current` is the
+ *  anchored text today (null when it's gone), for the digest's "now reads". */
+function staleness(t, text, doc) {
   if (text == null || !t.rev) return { outdated: false };
-  const current = anchorContentIn(text, t.anchor ?? {});
+  const anchor = t.anchor ?? {};
+  const current = anchorContentIn(text, anchor);
+  const withCurrent = (outdated) => (current === undefined ? { outdated } : { outdated, current });
   if (t.rev.anchorHash && current !== undefined) {
-    return { outdated: current === null || sha256Short(current) !== t.rev.anchorHash, current };
+    return withCurrent(current === null || sha256Short(current) !== t.rev.anchorHash);
   }
-  const outdated = t.rev.bodyHash ? t.rev.bodyHash !== bodyHash(text) : false;
-  return current === undefined ? { outdated } : { outdated, current };
+  const git = t.rev.git;
+  if (git && git.commit !== WORKING_REV) {
+    const thenText = reviewedText(doc, git);
+    const changed = thenText == null ? undefined : anchorChanged(thenText, text, anchor);
+    if (changed !== undefined) return withCurrent(changed);
+  }
+  return withCurrent(t.rev.bodyHash ? t.rev.bodyHash !== bodyHash(text) : false);
 }
 
 // ---- Sidecar location: MUST match ReviewMdPlugin.sidecarPathFor.
@@ -87,7 +97,7 @@ function readDoc(file) {
   const threads = (review?.threads ?? []).map((t) => ({
     ...t,
     messages: t.messages ?? [],
-    ...staleness(t, text),
+    ...staleness(t, text, file),
   }));
   return { uid: review?.uid ?? null, threads };
 }
@@ -190,6 +200,31 @@ function openUrl(url, flags) {
 const url = (action, params) =>
   `obsidian://${action}?${new URLSearchParams(params).toString().replace(/\+/g, "%20")}`;
 
+/** The doc as the reviewer saw it: the stamped blob (survives renames), else the
+ *  file at the stamped commit. null when git can't produce it. Cached, since many
+ *  threads on a doc share one reviewed version. */
+const reviewedCache = new Map();
+function reviewedText(doc, git) {
+  const key = `${resolve(doc)}\0${git.blob ?? ""}\0${git.commit}`;
+  if (!reviewedCache.has(key)) reviewedCache.set(key, readReviewed(doc, git));
+  return reviewedCache.get(key);
+}
+function readReviewed(doc, git) {
+  const run = (args) => {
+    try {
+      return execFileSync("git", ["-C", dirname(resolve(doc)), ...args], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 5_000,
+        maxBuffer: 16 * 1024 * 1024,
+      });
+    } catch {
+      return null;
+    }
+  };
+  return (git.blob && run(["cat-file", "-p", git.blob])) ?? run(["show", `${git.commit}:./${basename(doc)}`]);
+}
+
 // ---- Commands
 
 const COMMANDS = {
@@ -267,6 +302,50 @@ Example:
       const vault = vaultRootOf(doc) ? basename(vaultRootOf(doc)) : undefined;
       process.stdout.write(
         threadsDigest([{ ...f, threads: [t] }], { scope: `${f.path} · ${id}`, filter: { includeResolved: !!t.resolved }, vault }),
+      );
+    },
+  },
+
+  diff: {
+    usage: "reviews diff <doc.md> <thread-id> [--json]",
+    summary: "The commented passage as the reviewer saw it, next to today's",
+    help: `Pulls the doc as the reviewer saw it from git and prints just the commented
+passage (or diagram box, arrow, image, link) then and now, so you can tell whether
+the point was already handled: changed, unchanged, or gone. Read-only; the "then"
+side needs the doc in a git clone.
+
+Example:
+  reviews diff docs/designs/design.md d1a2b3`,
+    run({ flags, pos }) {
+      const [doc, id] = pos;
+      if (!doc || !id) fail(2, `usage: ${this.usage}`);
+      const [f] = load(doc, { includeResolved: true });
+      const t = f.threads.find((x) => x.id === id);
+      if (!t) fail(3, `no thread ${id} on ${doc} (try: reviews list ${doc})`);
+      const anchor = t.anchor ?? {};
+      const git = t.rev?.git;
+      const missing = !git
+        ? "the doc wasn't in git when the comment was written"
+        : git.commit === WORKING_REV
+          ? "the comment was written on uncommitted edits"
+          : null;
+      const thenText = missing ? null : reviewedText(doc, git);
+      const why = missing ?? (thenText == null ? `git can't find ${git.commit} here` : null);
+      const then = thenText == null ? undefined : anchorContentIn(thenText, anchor);
+      const now = existsSync(doc) ? anchorContentIn(readFileSync(doc, "utf8"), anchor) : null;
+      const state =
+        now === null ? "gone" : then === undefined || now === undefined ? "unknown" : then === now ? "unchanged" : "changed";
+      if (flags.json) {
+        const out = { file: f.path, id, commit: git?.commit ?? null, state, then: then ?? null, now: now ?? null };
+        return process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+      }
+      const say = (v) => (v === null ? "(not in the doc)" : v === undefined ? "(can't pin this anchor down)" : `“${v}”`);
+      process.stdout.write(
+        [
+          `[${id}] ${anchorWhere(anchor)} — ${state}`,
+          `then (${git?.commit ?? "no commit"}): ${why ? `(unavailable: ${why})` : say(then)}`,
+          `now: ${say(now)}`,
+        ].join("\n") + "\n",
       );
     },
   },

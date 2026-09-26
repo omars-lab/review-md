@@ -57,9 +57,11 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
      before passage stamps still fall back to the whole-doc hash, in both.
   3. ~~**`--since <time>`**~~ — **DONE 2026-09-26.** On list/find; takes an age (`2h`,
      `3d`) or a date.
-  4. **`reviews diff <doc> <id>`** — the anchored passage as the reviewer saw it
-     (`git show <rev.git.commit>:<path>`) next to today's, so an agent sees whether the
-     point was already addressed. Small, read-only.
+  4. ~~**`reviews diff <doc> <id>`**~~ — **DONE 2026-09-26.** Then (from the stamped git
+     blob, so renames don't break it) vs now, with `changed` / `unchanged` / `gone`.
+     Building it showed older threads (no passage stamp) were flagged OUTDATED on any
+     edit; both the plugin and the CLI now compare the passage in the reviewed git
+     version instead — see [`docs/issues/outdated-older-threads.md`](issues/outdated-older-threads.md).
   5. **Start a thread** — `obsidian://review-md-comment?file&quote=<text>&body` +
      `reviews comment`, so an agent can review a doc, not just answer. Medium: the plugin
      must find the passage by quote and write the `^id` into the doc.

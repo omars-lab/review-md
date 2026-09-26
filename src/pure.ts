@@ -779,3 +779,31 @@ export function threadsDigest(
   if (!count) lines.push("", "_No threads match._");
   return lines.join("\n") + "\n";
 }
+
+// ---- x-success results: what an operation hands back to its caller.
+
+/** How much digest text rides on an x-success URL. URLs have no hard limit on
+ *  macOS, but the apps receiving them often cap far lower; past this the digest
+ *  is cut and `truncated=true` says to read the clipboard (or the CLI) instead. */
+export const DIGEST_URL_MAX = 30_000;
+
+/** The params `review-md-export` adds to its x-success URL. */
+export function digestResultParams(text: string, count: number): Record<string, string> {
+  const truncated = text.length > DIGEST_URL_MAX;
+  return {
+    count: String(count),
+    digest: truncated ? text.slice(0, DIGEST_URL_MAX) : text,
+    truncated: String(truncated),
+  };
+}
+
+/** `url` with `params` added to its query, keeping what it already has (and any
+ *  `#fragment`). Spaces encode as %20, not +, since callers aren't all forms. */
+export function withQueryParams(url: string, params: Record<string, string>): string {
+  const extra = new URLSearchParams(params).toString().replace(/\+/g, "%20");
+  if (!extra) return url;
+  const hash = url.indexOf("#");
+  const [base, frag] = hash < 0 ? [url, ""] : [url.slice(0, hash), url.slice(hash)];
+  const sep = base.includes("?") ? (base.endsWith("?") || base.endsWith("&") ? "" : "&") : "?";
+  return `${base}${sep}${extra}${frag}`;
+}

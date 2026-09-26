@@ -6,6 +6,7 @@
  *   - package.json     "version"
  *   - manifest.json    "version"          (source of truth for BRAT + the store)
  *   - versions.json    { <version>: <minAppVersion> }   (from manifest.minAppVersion)
+ *   - plugins/review-md/.claude-plugin/plugin.json "version"   (the Claude Code plugin)
  *
  * Run:  node scripts/version.mjs <new-version>   (or: make version V=<new-version>)
  */
@@ -23,17 +24,24 @@ if (!next || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(next)) {
 const readJson = (f) => JSON.parse(readFileSync(join(repo, f), "utf8"));
 const writeJson = (f, o) => writeFileSync(join(repo, f), JSON.stringify(o, null, 2) + "\n");
 
+const CLAUDE_PLUGIN = "plugins/review-md/.claude-plugin/plugin.json";
 const pkg = readJson("package.json");
 const manifest = readJson("manifest.json");
 const versions = readJson("versions.json");
+const claudePlugin = readJson(CLAUDE_PLUGIN);
 
 pkg.version = next;
 manifest.version = next;
 versions[next] = manifest.minAppVersion;
+// The Claude Code plugin ships from the same commit, so it carries the same number.
+claudePlugin.version = next;
 
 writeJson("package.json", pkg);
 writeJson("manifest.json", manifest);
 writeJson("versions.json", versions);
+writeJson(CLAUDE_PLUGIN, claudePlugin);
 
-console.log(`version → ${next} (package.json, manifest.json, versions.json[${next}]=${manifest.minAppVersion})`);
+console.log(
+  `version → ${next} (package.json, manifest.json, versions.json[${next}]=${manifest.minAppVersion}, ${CLAUDE_PLUGIN})`,
+);
 console.log("next: commit these, then `make release` to cut the GitHub release BRAT installs from");

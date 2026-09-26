@@ -48,6 +48,24 @@
       ]
     },
     {
+      "id": "comment",
+      "action": "review-md-comment",
+      "summary": "Start a thread",
+      "description": "Start a new comment thread on a passage (found by `quote`), a diagram box (`node`), or an arrow (`from` + `to`). Pass exactly one target. A passage gets a `^id` written into the doc, as when a reviewer comments by hand.",
+      "params": [
+        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).", "example": "docs" },
+        { "name": "file", "required": true, "type": "string", "description": "Vault-relative path to the markdown file to comment on.", "example": "designs/design.md" },
+        { "name": "body", "required": true, "type": "string", "description": "The first message of the thread.", "example": "This step needs a timeout." },
+        { "name": "quote", "required": false, "type": "string", "description": "Words from the passage or heading to comment on (the first passage containing them, case-insensitive).", "example": "sidecar file" },
+        { "name": "node", "required": false, "type": "string", "description": "Id of a mermaid diagram box to comment on.", "example": "Plugin" },
+        { "name": "from", "required": false, "type": "string", "description": "Start box id of a mermaid arrow to comment on (with `to`).", "example": "Plugin" },
+        { "name": "to", "required": false, "type": "string", "description": "End box id of a mermaid arrow to comment on (with `from`).", "example": "Sidecar" },
+        { "name": "author", "required": false, "type": "string", "default": "external", "description": "Author name recorded on the first message.", "example": "claude" },
+        { "name": "x-success", "required": false, "type": "string", "description": "URL opened once the thread is stored (x-callback-url).", "example": "myapp://commented" },
+        { "name": "x-error", "required": false, "type": "string", "description": "URL opened when the operation fails (x-callback-url).", "example": "myapp://failed" }
+      ]
+    },
+    {
       "id": "export",
       "action": "review-md-export",
       "summary": "Copy threads to the clipboard for an AI tool",

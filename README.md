@@ -280,11 +280,13 @@ reviews diff docs/designs/design.md d1a2b3     # the passage then (from git) vs 
 reviews reply docs/designs/design.md d1a2b3 "Fixed in abc123." --author claude
 reviews reply docs/designs/design.md d1a2b3 "Fixed in abc123." --resolve   # answer and close
 reviews resolve docs/designs/design.md d1a2b3 [--reopen]
+reviews comment docs/designs/design.md "Say what happens on timeout." --quote "retries"   # start a thread
+reviews comment docs/designs/design.md "Who owns this?" --node Plugin   # …on a diagram box (--from/--to for an arrow)
 ```
 
 Add `--json` to `list`/`find`/`show`/`diff`/`stats` for structured output. The data format and
-exit codes are in [`docs/agent-contract.md`](docs/agent-contract.md). `reply` waits
-until the reply is written and exits 4 if it never arrives.
+exit codes are in [`docs/agent-contract.md`](docs/agent-contract.md). `reply`,
+`resolve` and `comment` wait until the change is written and exit 4 if it never arrives.
 
 The plugin's [`reviews` skill](plugins/review-md/skills/reviews/SKILL.md) runs the whole
 loop: find what's waiting → fix the doc or answer → reply on the thread. In this repo,

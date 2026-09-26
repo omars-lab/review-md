@@ -66,6 +66,29 @@ Example:
 obsidian://review-md-resolve?vault=docs&file=designs%2Fdesign.md&thread=d1a2b3
 ```
 
+## `obsidian://review-md-comment` — Start a thread
+
+Start a new comment thread on a passage (found by `quote`), a diagram box (`node`), or an arrow (`from` + `to`). Pass exactly one target. A passage gets a `^id` written into the doc, as when a reviewer comments by hand.
+
+| Param | Required | Type | Default / Enum | Description |
+|---|---|---|---|---|
+| `vault` | yes — URL only | string | — | Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). |
+| `file` | yes | string | — | Vault-relative path to the markdown file to comment on. |
+| `body` | yes | string | — | The first message of the thread. |
+| `quote` | no | string | — | Words from the passage or heading to comment on (the first passage containing them, case-insensitive). |
+| `node` | no | string | — | Id of a mermaid diagram box to comment on. |
+| `from` | no | string | — | Start box id of a mermaid arrow to comment on (with `to`). |
+| `to` | no | string | — | End box id of a mermaid arrow to comment on (with `from`). |
+| `author` | no | string | `external` | Author name recorded on the first message. |
+| `x-success` | no | string | — | URL opened once the thread is stored (x-callback-url). |
+| `x-error` | no | string | — | URL opened when the operation fails (x-callback-url). |
+
+Example:
+
+```
+obsidian://review-md-comment?vault=docs&file=designs%2Fdesign.md&body=This%20step%20needs%20a%20timeout.
+```
+
 ## `obsidian://review-md-export` — Copy threads to the clipboard for an AI tool
 
 Gather comment threads — from one file, or every file in the vault — into a Markdown digest (anchor, state, messages, and an open/reply link per thread) and copy it to the clipboard, ready to paste into any AI chat. Open threads only unless `resolved=include`. The same digest `npm run reviews -- list` prints from a clone.

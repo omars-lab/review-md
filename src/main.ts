@@ -30,6 +30,7 @@ import {
   mermaidBlocksFrom,
   anchorContentIn,
   anchorChanged,
+  anchorForTarget,
   escapeRegExp,
   MERMAID_SHAPES,
   effectiveReviewer,
@@ -242,6 +243,7 @@ export default class ReviewMdPlugin extends Plugin {
           this.validateParams(op, params);
           if (op.id === "reply") await this.handleReply(params);
           else if (op.id === "resolve") await this.handleResolve(params);
+          else if (op.id === "comment") await this.handleComment(params);
           else if (op.id === "export") await this.handleExport(params);
           else await this.handleUri(op, params);
           if (params["x-success"]) window.open(String(params["x-success"]));
@@ -1609,6 +1611,23 @@ export default class ReviewMdPlugin extends Plugin {
     }
     await this.setThreadResolved(file, params.thread, resolved);
     new Notice(`review-md: ${resolved ? "resolved" : "reopened"} ${params.thread} in ${file.path}`);
+  }
+
+  /** `comment` action: start a thread on a passage (by quote), a diagram box or an
+   *  arrow — the same anchor a reviewer's click would make. */
+  private async handleComment(params: Record<string, string>): Promise<void> {
+    const file = this.resolveFile(params.file);
+    if (!params.body) throw new Error("missing `body` param");
+    const anchor = anchorForTarget(await this.app.vault.read(file), {
+      quote: params.quote || undefined,
+      node: params.node || undefined,
+      from: params.from || undefined,
+      to: params.to || undefined,
+    });
+    if (typeof anchor === "string") throw new Error(anchor);
+    const id = await this.createThread(file, anchor, { author: params.author || "external", body: params.body });
+    this.notifyReviewChanged(file);
+    new Notice(`review-md: started ${id} in ${file.path}`);
   }
 
   /**

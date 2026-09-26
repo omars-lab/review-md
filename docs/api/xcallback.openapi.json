@@ -249,6 +249,124 @@
         }
       }
     },
+    "/review-md-comment": {
+      "get": {
+        "operationId": "comment",
+        "summary": "Start a thread",
+        "description": "Start a new comment thread on a passage (found by `quote`), a diagram box (`node`), or an arrow (`from` + `to`). Pass exactly one target. A passage gets a `^id` written into the doc, as when a reviewer comments by hand.\n\nInvoke as: `obsidian://review-md-comment?…`\n\nExample: `obsidian://review-md-comment?vault=docs&file=designs%2Fdesign.md&body=This%20step%20needs%20a%20timeout.`",
+        "parameters": [
+          {
+            "name": "vault",
+            "in": "query",
+            "required": true,
+            "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "docs"
+          },
+          {
+            "name": "file",
+            "in": "query",
+            "required": true,
+            "description": "Vault-relative path to the markdown file to comment on.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "designs/design.md"
+          },
+          {
+            "name": "body",
+            "in": "query",
+            "required": true,
+            "description": "The first message of the thread.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "This step needs a timeout."
+          },
+          {
+            "name": "quote",
+            "in": "query",
+            "required": false,
+            "description": "Words from the passage or heading to comment on (the first passage containing them, case-insensitive).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "sidecar file"
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": false,
+            "description": "Id of a mermaid diagram box to comment on.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "Plugin"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Start box id of a mermaid arrow to comment on (with `to`).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "Plugin"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "End box id of a mermaid arrow to comment on (with `from`).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "Sidecar"
+          },
+          {
+            "name": "author",
+            "in": "query",
+            "required": false,
+            "description": "Author name recorded on the first message.",
+            "schema": {
+              "type": "string",
+              "default": "external"
+            },
+            "example": "claude"
+          },
+          {
+            "name": "x-success",
+            "in": "query",
+            "required": false,
+            "description": "URL opened once the thread is stored (x-callback-url).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "myapp://commented"
+          },
+          {
+            "name": "x-error",
+            "in": "query",
+            "required": false,
+            "description": "URL opened when the operation fails (x-callback-url).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "myapp://failed"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success. If `x-success` was supplied, that URL is opened."
+          },
+          "400": {
+            "description": "Missing or invalid parameters. If `x-error` was supplied, that URL is opened."
+          }
+        }
+      }
+    },
     "/review-md-export": {
       "get": {
         "operationId": "export",

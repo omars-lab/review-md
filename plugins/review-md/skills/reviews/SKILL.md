@@ -5,7 +5,8 @@ description: >-
   plugin: find the open threads, act on each (fix the doc, answer the question), and
   reply on the thread so the reviewer sees it. Use when asked to "address review
   comments", "what feedback is open", "answer the review threads", "what's waiting on me
-  in the docs", "find comments about X", or "reply to the comment on <doc>", or when a
+  in the docs", "find comments about X", "reply to the comment on <doc>", or "review
+  <doc> and leave comments", or when a
   repo has `.<name>.comments.md` files next to its docs. Drives the `reviews` CLI;
   reading works offline from the clone, replies go through Obsidian.
 ---
@@ -52,6 +53,14 @@ rather than guessing flags.
    answered a question, pushed back, or aren't sure it's settled — the reviewer
    decides then. `reviews resolve <doc.md> <id>` resolves on its own; `--reopen`
    undoes it.
+
+## Reviewing a doc yourself
+
+Asked to review a doc, leave your points where they apply, as a reviewer would:
+`reviews comment <doc.md> "<point>" --quote "<words from the passage>"` — or
+`--node <id>` for a diagram box, `--from <id> --to <id>` for an arrow. It prints the
+new thread's id once it's in the comments file (exit 4 if it never arrived, as with
+reply). One thread per point; don't restate the passage in the message.
 
 Exit codes: 0 OK · 2 bad usage · 3 no comments file / no such thread · 4 Obsidian
 didn't take it.

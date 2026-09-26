@@ -75,7 +75,7 @@
         { "name": "file", "required": false, "type": "string", "description": "Vault-relative path of one file to export. Omit to export every file with comments.", "example": "designs/design.md" },
         { "name": "text", "required": false, "type": "string", "description": "Only threads whose messages, authors or anchor contain this text (case-insensitive — the same match as the panel's search box).", "example": "frontmatter" },
         { "name": "resolved", "required": false, "type": "string", "enum": ["exclude", "include"], "default": "exclude", "description": "Whether resolved threads are included.", "example": "include" },
-        { "name": "x-success", "required": false, "type": "string", "description": "URL opened once the digest is on the clipboard (x-callback-url).", "example": "myapp://exported" },
+        { "name": "x-success", "required": false, "type": "string", "description": "URL opened once the digest is on the clipboard (x-callback-url). The digest comes back on it too, for callers that can't read the clipboard: `count` (threads), `digest` (the Markdown, cut at 30,000 characters) and `truncated` (`true` when it was cut — read the clipboard instead).", "example": "myapp://exported" },
         { "name": "x-error", "required": false, "type": "string", "description": "URL opened when the export fails (x-callback-url).", "example": "myapp://failed" }
       ]
     }

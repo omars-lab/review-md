@@ -31,6 +31,8 @@ import {
   anchorContentIn,
   anchorChanged,
   anchorForTarget,
+  digestResultParams,
+  withQueryParams,
   escapeRegExp,
   MERMAID_SHAPES,
   effectiveReviewer,
@@ -241,12 +243,13 @@ export default class ReviewMdPlugin extends Plugin {
       this.registerObsidianProtocolHandler(op.action, async (params) => {
         try {
           this.validateParams(op, params);
+          let result: Record<string, string> = {};
           if (op.id === "reply") await this.handleReply(params);
           else if (op.id === "resolve") await this.handleResolve(params);
           else if (op.id === "comment") await this.handleComment(params);
-          else if (op.id === "export") await this.handleExport(params);
+          else if (op.id === "export") result = await this.handleExport(params);
           else await this.handleUri(op, params);
-          if (params["x-success"]) window.open(String(params["x-success"]));
+          if (params["x-success"]) window.open(withQueryParams(String(params["x-success"]), result));
         } catch (err) {
           console.error("[review-md] protocol error", err);
           if (params["x-error"]) window.open(String(params["x-error"]));
@@ -1802,16 +1805,22 @@ export default class ReviewMdPlugin extends Plugin {
   }
 
   /** Copy the export digest to the clipboard and say how much went. */
-  private async copyThreadsDigest(filter: ExportFilter, file?: TFile): Promise<void> {
-    const { text, count } = await this.threadsDigestFor(filter, file);
-    await navigator.clipboard.writeText(text);
-    new Notice(`review-md: copied ${count} thread${count === 1 ? "" : "s"} for AI`);
+  private async copyThreadsDigest(filter: ExportFilter, file?: TFile): Promise<{ text: string; count: number }> {
+    const digest = await this.threadsDigestFor(filter, file);
+    await navigator.clipboard.writeText(digest.text);
+    new Notice(`review-md: copied ${digest.count} thread${digest.count === 1 ? "" : "s"} for AI`);
+    return digest;
   }
 
-  /** `export` action: the digest for `file` (or the vault), filtered, to the clipboard. */
-  private async handleExport(params: Record<string, string>): Promise<void> {
+  /** `export` action: the digest for `file` (or the vault), filtered, to the
+   *  clipboard — and handed back on x-success for callers that can't read it. */
+  private async handleExport(params: Record<string, string>): Promise<Record<string, string>> {
     const file = params.file ? this.resolveFile(params.file) : undefined;
-    await this.copyThreadsDigest({ includeResolved: params.resolved === "include", text: params.text }, file);
+    const { text, count } = await this.copyThreadsDigest(
+      { includeResolved: params.resolved === "include", text: params.text },
+      file,
+    );
+    return digestResultParams(text, count);
   }
 
   /** Resolve + open the target file and, when a thread param is present, jump to

@@ -99,7 +99,7 @@ Gather comment threads — from one file, or every file in the vault — into a 
 | `file` | no | string | — | Vault-relative path of one file to export. Omit to export every file with comments. |
 | `text` | no | string | — | Only threads whose messages, authors or anchor contain this text (case-insensitive — the same match as the panel's search box). |
 | `resolved` | no | string | enum: `exclude`, `include` | Whether resolved threads are included. |
-| `x-success` | no | string | — | URL opened once the digest is on the clipboard (x-callback-url). |
+| `x-success` | no | string | — | URL opened once the digest is on the clipboard (x-callback-url). The digest comes back on it too, for callers that can't read the clipboard: `count` (threads), `digest` (the Markdown, cut at 30,000 characters) and `truncated` (`true` when it was cut — read the clipboard instead). |
 | `x-error` | no | string | — | URL opened when the export fails (x-callback-url). |
 
 Example:

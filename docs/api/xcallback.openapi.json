@@ -422,7 +422,7 @@
             "name": "x-success",
             "in": "query",
             "required": false,
-            "description": "URL opened once the digest is on the clipboard (x-callback-url).",
+            "description": "URL opened once the digest is on the clipboard (x-callback-url). The digest comes back on it too, for callers that can't read the clipboard: `count` (threads), `digest` (the Markdown, cut at 30,000 characters) and `truncated` (`true` when it was cut — read the clipboard instead).",
             "schema": {
               "type": "string"
             },

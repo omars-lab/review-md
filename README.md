@@ -296,7 +296,9 @@ next features come from.
 
 No shell? From inside Obsidian, **Copy open threads for AI** or
 `obsidian://review-md-export?vault=<vault>[&file=<path>][&text=<words>][&resolved=include]`
-puts the same digest on the clipboard.
+puts the same digest on the clipboard. Add `&x-success=<your-url>` to get it back
+without the clipboard: the URL is opened with `count`, `digest` and `truncated` added
+(the digest is cut at 30,000 characters; `truncated=true` then says so).
 
 ---
 

@@ -29,6 +29,9 @@ import {
   anchorContentIn,
   anchorChanged,
   anchorForTarget,
+  digestResultParams,
+  withQueryParams,
+  DIGEST_URL_MAX,
   ordinalsFromLog,
   revKeyOf,
   revLabelFor,
@@ -592,4 +595,19 @@ test("anchorForTarget: diagram boxes and arrows must exist", () => {
   assert.equal((anchorForTarget(doc, { from: "A", to: "B" }) as { quote: string }).quote, "A → B");
   assert.match(anchorForTarget(doc, { from: "B", to: "A" }) as string, /no arrow/);
   assert.match(anchorForTarget(doc, { from: "A" }) as string, /both ends/);
+});
+
+test("withQueryParams: adds to any query shape, keeps the fragment, spaces as %20", () => {
+  assert.equal(withQueryParams("myapp://done", {}), "myapp://done");
+  assert.equal(withQueryParams("myapp://done", { a: "x y" }), "myapp://done?a=x%20y");
+  assert.equal(withQueryParams("myapp://done?k=1", { a: "b" }), "myapp://done?k=1&a=b");
+  assert.equal(withQueryParams("myapp://done?", { a: "b" }), "myapp://done?a=b");
+  assert.equal(withQueryParams("myapp://done?k=1#top", { a: "&" }), "myapp://done?k=1&a=%26#top");
+});
+
+test("digestResultParams: the digest rides along, cut and flagged when too long", () => {
+  assert.deepEqual(digestResultParams("## doc\n", 2), { count: "2", digest: "## doc\n", truncated: "false" });
+  const big = digestResultParams("x".repeat(DIGEST_URL_MAX + 5), 9);
+  assert.equal(big.digest.length, DIGEST_URL_MAX);
+  assert.equal(big.truncated, "true");
 });

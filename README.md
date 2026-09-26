@@ -18,6 +18,48 @@ reviewing, and every thread is shareable and repliable through `obsidian://` lin
 
 ---
 
+## Opinionated assumptions
+
+review-md is built for one way of working. If these fit you, it will too:
+
+- **An AI coding tool writes your design docs.** You and an agent (e.g. Claude Code)
+  produce plans, specs and design notes as Markdown files in the repo, not in a wiki or
+  a slide deck.
+- **Not everything needs to be an artifact.** A shareable page is great for some
+  things, but most plans are just Markdown in the repo, and you don't want to publish
+  each one just to discuss it.
+- **You still want to comment the way you do on an artifact.** Point at the exact
+  sentence, heading, image or diagram box, leave a note, and talk it through in a
+  thread, right on the rendered plan.
+- **Comments belong in git, next to the doc.** Threads are checked in beside the doc
+  they're about, reviewed in the same PR, and outlive any one chat session or tool.
+- **The agent reads the feedback and answers it.** The same threads you write in
+  Obsidian are what the agent picks up, acts on, and replies to, with no copy-pasting
+  between windows.
+- **You review in Obsidian and commit in the terminal.** Obsidian renders and holds the
+  conversation; git stays in the CLI.
+
+## How it's meant to be used
+
+1. **Your agent drafts a plan** (say `docs/designs/plan.md`) and commits it.
+2. **You open the vault in Obsidian** and review the rendered doc: turn on comment mode,
+   click what you disagree with, write the thread. It lands in `.plan.comments.md`,
+   next to the doc. You can comment on uncommitted edits too; a post-commit hook
+   re-anchors those threads to the commit once it lands.
+3. **The agent works the feedback.** With the [Claude Code plugin](#claude-code-plugin)
+   installed, ask it to "address the review comments". It finds the threads waiting on
+   it, changes the doc or answers, and replies on each thread, naming the commit.
+4. **You see the replies in Obsidian**, flagged **outdated** where the passage changed,
+   step back through versions to compare, and **Resolve** what's done.
+5. **Commit the doc and its comments together**, so the review ships with the change.
+
+Obsidian only ever writes the comment files; git stays in the terminal. See
+[`docs/designs/design.md`](docs/designs/design.md) (a dogfood doc — open it *in* the
+reviewer for the full experience) and [`docs/issues/`](docs/issues/) for the design
+rationale.
+
+---
+
 ## What you can do
 
 - 💬 **Comment on anything rendered** — a phrase or block (`text`), a heading
@@ -134,6 +176,34 @@ a GitHub repo and keeps it updated — no cloning, no build.
 
 BRAT then pulls new versions automatically whenever a release is cut.
 
+### From the release zip (no BRAT)
+
+Download `review-md-<version>.zip` from the
+[latest release](https://github.com/omars-lab/review-md/releases/latest) and unzip it
+into your vault's plugin folder, then enable **Review MD**:
+
+```sh
+unzip review-md-*.zip -d /path/to/vault/.obsidian/plugins/
+```
+
+No auto-update: repeat with the next release's zip.
+
+### Claude Code plugin
+
+The agent side: a `reviews` skill plus the `reviews` command line, so Claude Code can
+find, answer and reply to review threads in any repo. Two lines in Claude Code:
+
+```
+/plugin marketplace add omars-lab/review-md
+/plugin install review-md@review-md
+```
+
+(From a shell: `claude plugin marketplace add omars-lab/review-md`, then
+`claude plugin install review-md@review-md`.) It reads comments straight from your
+clone; replies need Obsidian running with the review-md plugin installed. Without
+Claude Code, grab `reviews.mjs` from the release. It needs only Node 18+:
+`node reviews.mjs help`.
+
 From a clone, the same install runs from the shell: `make setup-check VAULT=/abs/vault`
 → `make setup-install VAULT=/abs/vault` → `make setup-verify VAULT=<vault name>` (needs the
 vault open with Settings → General → Command line interface on; details in the
@@ -167,58 +237,34 @@ npm run install:dev   # symlinks the plugin into docs/ (the dev vault) + a sampl
 Open the `docs/` folder as a vault in Obsidian and open `designs/design.md` — a
 git-tracked dogfood doc that comes with live comment threads.
 
-### Cutting a release (maintainers)
-
-Releases are manual — no GitHub Actions. Bump the version in lock-step, commit, then
-publish a GitHub release BRAT/​the store install from (needs an authenticated `gh`):
-
-```sh
-make version V=1.0.0   # updates manifest.json + package.json + versions.json together
-git commit -am "Release 1.0.0"
-make release-check     # validate readiness (version consistency, assets, clean tree)
-make release           # cuts the GitHub release; tag == manifest version, exactly
-```
-
----
-
-## The review workflow
-
-review-md assumes **commits happen in the CLI, reviews happen in Obsidian**:
-
-1. You change files and `git commit` in a terminal (or an agent session) — never in
-   Obsidian.
-2. You open the doc in Obsidian, drop threads, reply, resolve. Obsidian only ever writes
-   the sidecar.
-3. You can comment on the **uncommitted working copy**; when the CLI later commits the
-   file, a **post-commit hook** re-anchors those threads to the landed commit.
-
-See [`docs/designs/design.md`](docs/designs/design.md) (a dogfood doc — open it *in* the
-reviewer for the full experience) and [`docs/issues/`](docs/issues/) for the design rationale.
-
 ---
 
 ## For AI tools and scripts
 
-An agent working in the repo can read and answer the review without opening Obsidian.
-The `reviews` command line reads the sidecars straight from the clone; replying goes
-through Obsidian, so the plugin stays the only thing that writes them.
+An agent can read and answer the review without opening Obsidian. The `reviews`
+command line reads the comment files straight from the clone; replying goes through
+Obsidian, so the plugin stays the only thing that writes them. With the
+[Claude Code plugin](#claude-code-plugin) it's `reviews`; from a clone of this repo,
+`npm run reviews --`; standalone, `node reviews.mjs` from the release.
 
 ```sh
-npm run reviews -- help                                   # every command, with examples
-npm run reviews -- stats docs                             # where is feedback waiting?
-npm run reviews -- list docs --open --waiting claude      # open threads waiting on claude
-npm run reviews -- find "frontmatter" docs                # threads mentioning some words
-npm run reviews -- show docs/designs/design.md d1a2b3     # one thread in full
-npm run reviews -- reply docs/designs/design.md d1a2b3 "Fixed in abc123." --author claude
+reviews help                                   # every command, with examples
+reviews stats docs                             # where is feedback waiting?
+reviews list docs --open --waiting claude      # open threads waiting on claude
+reviews find "frontmatter" docs                # threads mentioning some words
+reviews show docs/designs/design.md d1a2b3     # one thread in full
+reviews reply docs/designs/design.md d1a2b3 "Fixed in abc123." --author claude
 ```
 
 Add `--json` to `list`/`find`/`show`/`stats` for structured output. The data format and
-exit codes are in [`docs/agent-contract.md`](docs/agent-contract.md).
+exit codes are in [`docs/agent-contract.md`](docs/agent-contract.md). `reply` waits
+until the reply is written and exits 4 if it never arrives.
 
-For Claude Code, the [`reviews` skill](.claude/skills/reviews/SKILL.md) runs the whole loop:
-find what's waiting → fix the doc or answer → reply on the thread. Its
-[`notes.md`](.claude/skills/reviews/notes.md) records what the CLI was missing in real
-use, which is where the next features come from.
+The plugin's [`reviews` skill](plugins/review-md/skills/reviews/SKILL.md) runs the whole
+loop: find what's waiting → fix the doc or answer → reply on the thread. In this repo,
+the [dogfood copy](.claude/skills/reviews/SKILL.md) runs it from source and logs what
+the CLI was missing in [`notes.md`](.claude/skills/reviews/notes.md), which is where the
+next features come from.
 
 No shell? From inside Obsidian, **Copy open threads for AI** or
 `obsidian://review-md-export?vault=<vault>[&file=<path>][&text=<words>][&resolved=include]`
@@ -234,9 +280,26 @@ npm install
 npm run dev        # esbuild watch → main.js
 npm run install:dev  # set up / refresh the .dev-vault harness
 make test          # unit tests for the pure logic (node --test, no deps)
-make check         # the full local gate (typecheck · test · api-check · validate · secrets)
+make check         # the full local gate (typecheck · test · api-check · cli-check · validate · secrets)
 make hooks         # install the pre-commit + post-commit git hooks
+make cli           # rebuild the bundled CLI in plugins/review-md/bin/ after editing scripts/reviews.mjs
 ```
+
+### Cutting a release (maintainers)
+
+One release ships both plugins from the same commit, with the same version number,
+and no GitHub Actions. The [`release`](.claude/skills/release/SKILL.md) skill walks
+through it. Needs an authenticated `gh`:
+
+```sh
+make version V=1.0.0   # manifest.json + package.json + versions.json + the Claude plugin.json
+git commit -am "Release 1.0.0"   # merge to main: the Claude plugin installs from there
+make release-check     # versions agree, CLI bundle fresh, plugin validates, zip builds
+make release           # GitHub release 1.0.0: main.js, manifest.json, styles.css,
+                       # review-md-1.0.0.zip, reviews.mjs
+```
+
+BRAT and the store read the release; the Claude Code plugin reads `main`.
 
 **Marketing media** (this README's screenshots and GIFs) is captured with the
 [`demo-media`](.claude/skills/demo-media/SKILL.md) skill, which drives the live plugin

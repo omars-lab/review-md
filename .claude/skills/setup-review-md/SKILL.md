@@ -90,3 +90,11 @@ Advanced → Command line interface. Same screenshot → click → screenshot di
 | every eval hangs to the 30 s timeout | A modal is open (trust dialog, error). Clear it as above. |
 | `review-md is latest` MISSING | The vault has an older build. BRAT: "Check for updates", or `install` after removing the plugin. |
 | verify screenshot blank | The window was in the background (rendering pauses). `verify` activates Obsidian first. Check nothing covers the window. |
+
+## Other install paths
+
+- **No BRAT:** unzip `review-md-<version>.zip` from the GitHub release into
+  `<vault>/.obsidian/plugins/`, then enable Review MD. `verify` works the same afterwards.
+- **The agent side** (the `reviews` skill + CLI) is a separate Claude Code plugin:
+  `claude plugin marketplace add omars-lab/review-md` then
+  `claude plugin install review-md@review-md`. Shipping both is the `release` skill.

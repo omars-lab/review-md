@@ -16,6 +16,28 @@ reviewing, and every thread is shareable and repliable through `obsidian://` lin
 > `^block-id` on the anchored block (text anchors only), so the doc's content is never
 > touched.
 
+## Quick start
+
+1. **Install.** In Obsidian, install and enable the community plugin **BRAT**, run
+   **BRAT: Add a beta plugin**, enter `omars-lab/review-md`, then enable **Review MD**.
+   (No BRAT? See [Install](#install).)
+2. **Set your name.** Settings → Review MD → Reviewer name. It's filled from git's
+   `user.name` if you have one.
+3. **Comment.** Open a Markdown doc and press `c` (or the ribbon's speech-bubble-with-a-+
+   icon) to turn on comment mode. Click a paragraph, heading, image, link or diagram node,
+   write your comment, and press **Comment**. Press `c` again to leave comment mode.
+4. **Find it again.** The comments sidebar (the plain speech-bubble icon) lists the doc's
+   threads. Reply, resolve, search and filter there.
+
+Where things go: each doc's threads are saved in a hidden file next to it,
+`.<doc name>.comments.md`. Obsidian's file list doesn't show dotfiles, but git does, so
+commit it with the doc. Commenting on a paragraph also adds a short `^id` to the end of
+that paragraph, so the comment stays attached when the text around it moves.
+
+Something broken or confusing? Run **Review MD: Report an issue** from the command
+palette, or use the button in the plugin's settings. The new issue is pre-filled with
+your versions.
+
 ---
 
 ## Opinionated assumptions
@@ -83,7 +105,7 @@ rationale.
   inline **version stepper** walks the anchored element back through every git revision,
   rendering it — diagram or text — exactly as it was in each version.
 - 🗂 **Triage sidebar** — cards carry a type badge and a version stepper. The sticky
-  header filters with chips (**open · hidden · resolved**) and a **Revisions** dropdown
+  header filters with chips (**open · outdated · resolved**) and a **Revisions** dropdown
   (only threads authored against one version of the doc, or the working copy), searches across bodies,
   authors and anchors, and sorts by **recency**, **doc position** or **author**; long
   threads fold to their latest message (**Show N earlier**). Edits update the one card
@@ -148,7 +170,7 @@ now — the very drift the thread was debating.
 
 ### Triage: chips, search, sort, fold
 
-The sticky header counts and filters open / hidden / resolved, searches every thread,
+The sticky header counts and filters open / outdated / resolved, searches every thread,
 and sorts by recency, doc position or author. Left: a search for `claude` in doc
 order. Right: a long thread folded to its latest message behind **Show 1 earlier**.
 

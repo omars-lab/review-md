@@ -1,5 +1,6 @@
 import {
   App,
+  apiVersion,
   Plugin,
   PluginSettingTab,
   Setting,
@@ -190,6 +191,14 @@ export default class ReviewMdPlugin extends Plugin {
     // Settings tab: reviewer identity (#6) + the mermaid-overlay toggle, so both
     // preferences are reachable from Settings, not only a command.
     this.addSettingTab(new ReviewMdSettingTab(this.app, this));
+    // A blank name posts as "reviewer", so a question and its answer both read
+    // "reviewer". Fill it once from git's user.name when there is one.
+    if (!this.settings.reviewerName.trim()) void this.defaultReviewerFromGit();
+    this.addCommand({
+      id: "report-issue",
+      name: "Report an issue",
+      callback: () => window.open(this.issueUrl()),
+    });
 
     // One Obsidian action per operation: obsidian://review-md-open?..., review-md-reply?...
     // We can't use a single handler with an `action`/`op` query selector because
@@ -228,7 +237,7 @@ export default class ReviewMdPlugin extends Plugin {
     // Comment mode (req 2) — Figma-style: toggle the reader into a click-to-
     // comment surface (custom cursor), and each click drops a thread anchored to
     // the highlighted selection, or to the clicked image / mermaid node.
-    this.commentRibbon = this.addRibbonIcon("messages-square", "review-md: comment mode", () =>
+    this.commentRibbon = this.addRibbonIcon("message-square-plus", "review-md: comment mode (c)", () =>
       this.setCommentMode(!this.commentMode),
     );
     this.addCommand({
@@ -256,17 +265,17 @@ export default class ReviewMdPlugin extends Plugin {
     // card's Copy menu, acting on the sidebar's currently-focused thread.
     this.addCommand({
       id: "copy-share-link",
-      name: "Copy share link for the selected thread",
+      name: "Copy link to the selected thread",
       callback: () => void this.copyFocusedThreadLink("share"),
     });
     this.addCommand({
       id: "copy-native-link",
-      name: "Copy native link for the selected thread",
+      name: "Copy plain Obsidian link to the selected thread",
       callback: () => void this.copyFocusedThreadLink("native"),
     });
     this.addCommand({
       id: "copy-reply-link",
-      name: "Copy reply-link template for the selected thread",
+      name: "Copy reply link (for an AI tool or script) for the selected thread",
       callback: () => void this.copyFocusedThreadLink("reply"),
     });
 
@@ -353,6 +362,44 @@ export default class ReviewMdPlugin extends Plugin {
    *  the draft composer's first comment and sidebar replies. */
   effectiveAuthor(): string {
     return effectiveReviewer(this.settings.reviewerName);
+  }
+
+  /** Set the reviewer name from `git config user.name`, once, when it's blank.
+   *  Quietly does nothing without git or Node (mobile). */
+  private async defaultReviewerFromGit(): Promise<void> {
+    const cp = nodeRequire("child_process");
+    const basePath = (this.app.vault.adapter as unknown as { basePath?: string })?.basePath;
+    if (!cp || !basePath) return;
+    const name = await new Promise<string>((res) => {
+      try {
+        cp.execFile("git", ["-C", basePath, "config", "user.name"], { timeout: 4000 }, (err: unknown, out: string) =>
+          res(err ? "" : String(out).trim()),
+        );
+      } catch {
+        res("");
+      }
+    });
+    if (!name || this.settings.reviewerName.trim()) return;
+    this.settings.reviewerName = name;
+    await this.saveSettings();
+  }
+
+  /** A new GitHub issue, pre-filled with the versions a bug report needs. */
+  issueUrl(): string {
+    const body = [
+      "**What happened**",
+      "",
+      "",
+      "**What you expected**",
+      "",
+      "",
+      "**Steps to reproduce**",
+      "",
+      "",
+      "---",
+      `review-md ${this.manifest.version} · Obsidian ${apiVersion} · ${navigator.platform}`,
+    ].join("\n");
+    return `https://github.com/omars-lab/review-md/issues/new?body=${encodeURIComponent(body)}`;
   }
 
   /** Flip the mermaid-overlay preference (command-palette entry point). */
@@ -958,7 +1005,10 @@ export default class ReviewMdPlugin extends Plugin {
 
   /** After a sidecar write: refresh the sidebar and re-run the mermaid augmenter.
    *  The sidecar isn't the reviewed file, so no metadata event fires for it — we
-   *  re-render the reading view ourselves so the augmenter re-injects nodes. */
+   *  re-render the reading view ourselves so the augmenter re-injects nodes. In
+   *  Live Preview that rerender touches nothing on screen, so re-scan the editor
+   *  directly; without it a new diagram comment only showed after re-focusing the
+   *  doc tab. */
   private notifyReviewChanged(file: TFile): void {
     const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_COMMENTS)[0]?.view;
     if (view instanceof CommentsView) void view.refresh();
@@ -966,7 +1016,10 @@ export default class ReviewMdPlugin extends Plugin {
       .getLeavesOfType("markdown")
       .map((l) => l.view)
       .filter((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path)
-      .forEach((v) => v.previewMode?.rerender(true));
+      .forEach((v) => {
+        if (v.getMode?.() === "source") void this.scanLivePreviewMermaid(v);
+        else v.previewMode?.rerender(true);
+      });
   }
 
   /** Push a new thread onto the file's sidecar and return its id. When
@@ -1633,7 +1686,13 @@ export default class ReviewMdPlugin extends Plugin {
       if (!(await this.app.vault.adapter.exists(this.sidecarPathFor(f)))) continue;
       const kept = filterThreads(await this.readThreads(f), filter);
       const threads = await Promise.all(
-        kept.map(async (t) => ({ ...t, outdated: await this.isThreadOutdated(f, t) })),
+        kept.map(async (t) => {
+          const outdated = await this.isThreadOutdated(f, t);
+          if (!outdated) return { ...t, outdated };
+          // What the passage says now, so an AI that can't open the doc still sees it.
+          const now = await this.anchorContentFor(f, t.anchor);
+          return { ...t, outdated, current: typeof now === "string" ? stripBlockIds(now) : now };
+        }),
       );
       files.push({ path: f.path, threads });
     }
@@ -2171,7 +2230,9 @@ class ReviewMdSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Reviewer name")
-      .setDesc('The name new comments and replies are posted under. Leave blank to post as "reviewer".')
+      .setDesc(
+        'The name new comments and replies are posted under. Filled from git\'s user.name when there is one; blank posts as "reviewer".',
+      )
       .addText((text) =>
         text
           .setPlaceholder("Your name")
@@ -2185,13 +2246,18 @@ class ReviewMdSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Show mermaid comment badges")
       .setDesc(
-        "Overlay comment nodes and edge badges on rendered mermaid diagrams. " +
-          "Off renders diagrams fully native (comments stay in the sidecar).",
+        "Show diagram comments as extra nodes and badges on rendered mermaid diagrams. " +
+          "Off shows the diagrams untouched (the comments are still in the comments file).",
       )
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.showMermaidComments)
           .onChange((value) => void this.plugin.setShowMermaidComments(value)),
       );
+
+    new Setting(containerEl)
+      .setName(`Version ${this.plugin.manifest.version}`)
+      .setDesc("Something broken or confusing? Open an issue; it's pre-filled with your versions.")
+      .addButton((btn) => btn.setButtonText("Report an issue").onClick(() => window.open(this.plugin.issueUrl())));
   }
 }

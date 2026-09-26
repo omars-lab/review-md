@@ -489,3 +489,22 @@ test("threadsDigest: per-file sections, state tags, links only with a vault, emp
   assert.match(linked, /open: obsidian:\/\/review-md-open\?vault=My%20Vault&file=a%20b\.md&thread=t1/);
   assert.match(threadsDigest([], { scope: "x" }), /_No threads match\._/);
 });
+
+test("threadsDigest: a lead-in says what to do, and outdated threads show today's text", () => {
+  const files = [
+    {
+      path: "d.md",
+      threads: [
+        { ...thread("t1"), outdated: true, current: "the new\n  wording" },
+        { ...thread("t2"), outdated: true, current: null },
+        { ...thread("t3"), current: "ignored when not outdated" },
+      ],
+    },
+  ];
+  const out = threadsDigest(files, { scope: "d.md" });
+  assert.match(out, /These are review comments people left/);
+  assert.match(out, /### \[t1\][^\n]*\nreviewed against: [^\n]*\nnow reads: “the new wording”/);
+  assert.match(out, /### \[t2\][^\n]*\nreviewed against: [^\n]*\nnow: \(no longer in the doc\)/);
+  assert.doesNotMatch(out, /ignored when not outdated/);
+  assert.doesNotMatch(threadsDigest([], { scope: "x" }), /These are review comments/);
+});

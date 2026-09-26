@@ -7430,6 +7430,11 @@ function threadsDigest(files, opts = { scope: "vault" }) {
     "",
     `${count} thread${count === 1 ? "" : "s"} (${what}) in ${kept.length} file${kept.length === 1 ? "" : "s"}.`
   ];
+  if (count)
+    lines.push(
+      "",
+      "These are review comments people left on the docs below. For each thread, change the doc or answer the question, and say what you did. OUTDATED means the passage changed since the comment was written; check it still applies."
+    );
   for (const f of kept) {
     lines.push("", `## ${f.path}`);
     for (const t of f.threads) {
@@ -7437,6 +7442,8 @@ function threadsDigest(files, opts = { scope: "vault" }) {
       lines.push("", `### [${t.id}] ${anchorWhere(t.anchor)} (${tags.join(", ")})`);
       const rev = t.rev;
       if (rev) lines.push(`reviewed against: ${rev.git?.commit ?? rev.bodyHash ?? "?"} \xB7 ${rev.ts ?? "?"}`);
+      if (t.outdated && t.current !== void 0)
+        lines.push(t.current === null ? "now: (no longer in the doc)" : `now reads: \u201C${t.current.replace(/\s+/g, " ").slice(0, 400)}\u201D`);
       if (opts.vault) {
         const q = (p) => new URLSearchParams(p).toString().replace(/\+/g, "%20");
         lines.push(`open: obsidian://review-md-open?${q({ vault: opts.vault, file: f.path, thread: t.id })}`);

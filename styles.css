@@ -224,8 +224,6 @@ body.theme-dark {
   padding: var(--size-4-2);
   margin: var(--size-4-3) 0;
   background: var(--background-secondary);
-  /* Keep a focused card clear of the sticky header (height set by focusThread). */
-  scroll-margin-top: calc(var(--review-md-header-h, 0px) + var(--size-4-3) + var(--size-4-2));
 }
 .review-md-thread.is-resolved {
   opacity: 0.6;
@@ -379,7 +377,8 @@ body.theme-dark {
 .review-md-commented {
   position: relative;
 }
-.review-md-commented::before {
+.review-md-commented::before,
+.review-md-commented-line::before {
   content: "";
   position: absolute;
   left: -10px;
@@ -389,8 +388,12 @@ body.theme-dark {
   border-radius: 2px;
   background: var(--review-md-amber-line);
 }
+/* Live Preview: the same bar, in the gutter so it clears the first letter. */
 .review-md-commented-line {
-  box-shadow: inset 3px 0 0 var(--review-md-amber-line);
+  position: relative;
+}
+.review-md-commented-line::before {
+  left: -8px;
 }
 .review-md-passage-mark.clickable-icon {
   position: absolute;

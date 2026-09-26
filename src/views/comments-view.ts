@@ -234,13 +234,23 @@ export class CommentsView extends ItemView {
     const card = this.contentEl.querySelector<HTMLElement>(`[data-thread-id="${threadId}"]`);
     if (!card) return;
     this.setFocused(threadId);
-    // The header is sticky and wraps (chips + search + sort), so its height varies;
-    // publish it as a CSS variable the card's scroll-margin-top reads, then align
-    // the card's top just under it. "start" (not "center") so a tall card — a
-    // mermaid preview plus messages — never lands with its head under the header.
-    const header = this.contentEl.querySelector<HTMLElement>(".review-md-header");
-    this.contentEl.style.setProperty("--review-md-header-h", `${header?.offsetHeight ?? 0}px`);
-    card.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Put the card's top just under the sticky header (it wraps, so its height
+    // varies) — the top, not the centre, so a tall card never lands with its head
+    // hidden. Measured and scrolled by hand: scrollIntoView ignored the header, and
+    // when this click just opened the sidebar the layout isn't settled yet, so
+    // align again once it is.
+    const align = () => {
+      const header = this.contentEl.querySelector<HTMLElement>(".review-md-header");
+      const gap = 8;
+      const offset =
+        card.getBoundingClientRect().top -
+        this.contentEl.getBoundingClientRect().top -
+        (header?.offsetHeight ?? 0) -
+        gap;
+      if (Math.abs(offset) > 2) this.contentEl.scrollTo({ top: this.contentEl.scrollTop + offset, behavior: "smooth" });
+    };
+    window.requestAnimationFrame(() => window.requestAnimationFrame(align));
+    window.setTimeout(align, 400);
     card.addClass("review-md-flash");
     window.setTimeout(() => card.removeClass("review-md-flash"), 1600);
     card.querySelector<HTMLTextAreaElement>(".review-md-reply-input")?.focus();

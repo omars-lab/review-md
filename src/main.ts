@@ -346,6 +346,11 @@ export default class ReviewMdPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("file-open", () => this.ensureMermaidAugmenter()),
     );
+    // Switching reading view ↔ Live Preview in the same tab fires neither of the
+    // above, only layout-change (which also fires on resizes, so debounce it).
+    this.registerEvent(
+      this.app.workspace.on("layout-change", debounce(() => this.ensureMermaidAugmenter(), 150, true)),
+    );
     this.app.workspace.onLayoutReady(() => this.ensureMermaidAugmenter());
 
     // Durable text anchoring (req: block-refs survive edits): stamp each rendered

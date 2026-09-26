@@ -49,14 +49,24 @@ interface Transient {
   scrollTop: number;
 }
 
-/** A thread's display status. `hidden` = its anchored version text has drifted
- *  (outdated), so it may no longer resolve in the doc. Partitioned by priority
- *  resolved > hidden > open, so the header counts sum to the total. */
-type ThreadCategory = "open" | "hidden" | "resolved";
-const CATEGORY_ORDER: ThreadCategory[] = ["open", "hidden", "resolved"];
+/** The amber "outdated" badge on a card's version row, with a tooltip that says
+ *  what it means and what to do about it. */
+function renderOutdatedBadge(parent: HTMLElement): void {
+  const badge = parent.createSpan({ cls: "review-md-outdated" });
+  setIcon(badge, "alert-triangle");
+  badge.createSpan({ text: "outdated" });
+  badge.title =
+    "The commented passage changed since this comment was written. Check whether the comment still applies, then reply or resolve.";
+}
+
+/** A thread's display status. `outdated` = its anchored passage changed since the
+ *  comment was written. Partitioned by priority resolved > outdated > open, so the
+ *  header counts sum to the total. */
+type ThreadCategory = "open" | "outdated" | "resolved";
+const CATEGORY_ORDER: ThreadCategory[] = ["open", "outdated", "resolved"];
 const CATEGORY_ICON: Record<ThreadCategory, string> = {
   open: "message-circle",
-  hidden: "eye-off",
+  outdated: "alert-triangle",
   resolved: "check",
 };
 
@@ -88,9 +98,9 @@ export class CommentsView extends ItemView {
    *  command-palette copy-link commands. */
   private focusedThreadId: string | null = null;
   /** Which status categories are visible; toggled by the header filter chips. */
-  private activeFilters = new Set<ThreadCategory>(["open", "hidden", "resolved"]);
+  private activeFilters = new Set<ThreadCategory>(["open", "outdated", "resolved"]);
   /** Thread ids whose reviewed body has drifted (outdated) — filled once the
-   *  current body hash is known, so a thread can be categorised "hidden". */
+   *  current body hash is known, so a thread can be categorised "outdated". */
   private outdatedIds = new Set<string>();
   /** The revision the "Revisions" header filter is pinned to: `null` = All,
    *  else a commit sha (or WORKING_REV) — only threads authored against it show. */
@@ -326,9 +336,9 @@ export class CommentsView extends ItemView {
     header.createEl("h3", { text: this.file.basename });
     const threads = this.threads;
 
-    // Status counts as clickable filter chips (open / hidden / resolved). Each
+    // Status counts as clickable filter chips (open / outdated / resolved). Each
     // toggles whether its category of cards is shown; all on by default. Counts
-    // + the "hidden" (drifted) split are finalised in fillVersionRows() once the
+    // + the "outdated" split are finalised in fillVersionRows() once the
     // body hash is known — chips are (re)built by refreshChips() from there.
     // "Revisions" filter — a dropdown that pins the list to comments authored
     // against one revision (All by default). Leads the controls row, ahead of the
@@ -399,7 +409,7 @@ export class CommentsView extends ItemView {
 
     this.emptyEl = root.createEl("p", {
       cls: "review-md-empty",
-      text: "No comment threads yet — turn on comment mode and click the document.",
+      text: "No comments yet. Press c (or the + speech-bubble icon) to turn on comment mode, then click a paragraph, diagram node, image or link.",
     });
     this.listEl = root.createDiv({ cls: "review-md-list" });
     for (const thread of threads) {
@@ -573,16 +583,16 @@ export class CommentsView extends ItemView {
     this.contentEl.scrollTop = t.scrollTop;
   }
 
-  /** The display category for a thread: resolved > hidden(drifted) > open. */
+  /** The display category for a thread: resolved > outdated > open. */
   private categoryOf(thread: ReviewThread): ThreadCategory {
     if (thread.resolved) return "resolved";
-    if (this.outdatedIds.has(thread.id)) return "hidden";
+    if (this.outdatedIds.has(thread.id)) return "outdated";
     return "open";
   }
 
   /** Recompute chip counts + active styling and show/hide cards per the filter. */
   private applyFilter(): void {
-    const counts: Record<ThreadCategory, number> = { open: 0, hidden: 0, resolved: 0 };
+    const counts: Record<ThreadCategory, number> = { open: 0, outdated: 0, resolved: 0 };
     for (const t of this.threads) counts[this.categoryOf(t)]++;
 
     this.contentEl.querySelectorAll<HTMLElement>(".review-md-chip").forEach((chip) => {
@@ -825,10 +835,11 @@ export class CommentsView extends ItemView {
     if (thread.messages.length === 0) {
       msgsEl.createDiv({ cls: "review-md-empty-thread", text: "New thread — add the first comment below." });
     }
-    // Fold toggle: with more than one message, the card can show just the last
-    // one. The button leads the list so "show N earlier" reads where the earlier
-    // messages would be; applyFold() sets its label + aria-expanded.
-    if (thread.messages.length > 1) {
+    // Fold toggle: with three or more messages, the card can show just the last
+    // one (a question and its answer aren't worth folding). The button leads the
+    // list so "show N earlier" reads where the earlier messages would be;
+    // applyFold() sets its label + aria-expanded.
+    if (thread.messages.length > 2) {
       const fold = msgsEl.createEl("button", { cls: "review-md-fold" });
       setIcon(fold.createSpan({ cls: "review-md-fold-icon" }), "chevron-right");
       fold.createSpan({ cls: "review-md-btn-label" });
@@ -885,7 +896,7 @@ export class CommentsView extends ItemView {
   private applyFold(card: ThreadCard): void {
     const rows = card.msgsEl.querySelectorAll<HTMLElement>(":scope > .review-md-message");
     const earlier = rows.length - 1;
-    const folded = earlier > 0 && this.isFolded(card.thread.id);
+    const folded = !!card.foldBtn && earlier > 0 && this.isFolded(card.thread.id);
     rows.forEach((row, i) => (row.hidden = folded && i < earlier));
     card.el.toggleClass("is-folded", folded);
     const btn = card.foldBtn;
@@ -1149,11 +1160,7 @@ export class CommentsView extends ItemView {
       attr: { "aria-label": "Older version" },
     });
     setIcon(older, "chevron-right");
-    if (outdated) {
-      const badge = step.createSpan({ cls: "review-md-outdated" });
-      setIcon(badge, "alert-triangle");
-      badge.createSpan({ text: "outdated" });
-    }
+    if (outdated) renderOutdatedBadge(step);
     const preview = slot.createDiv({ cls: "review-md-verpreview" });
     preview.hidden = true;
 
@@ -1196,18 +1203,22 @@ export class CommentsView extends ItemView {
     const rev = thread.rev;
     if (!rev?.bodyHash) return;
     const working = rev.git?.commit === WORKING_REV;
-    const version = working ? "working copy" : (rev.git?.commit ?? rev.bodyHash.slice(0, 7));
+    const commit = working ? undefined : rev.git?.commit;
+    // Off git there's no commit to name. The body hash looks like one but isn't, so
+    // show the day the comment was made instead.
+    const made = thread.messages[0]?.ts ? new Date(thread.messages[0].ts) : null;
+    const day = made && !isNaN(made.getTime()) ? made.toLocaleDateString() : null;
     const stamp = slot.createSpan({ cls: "review-md-rev-base" });
-    setIcon(stamp.createSpan({ cls: "review-md-rev-icon" }), working ? "git-branch" : "git-commit");
-    stamp.createSpan({ text: working ? ` ${version}` : ` on ${version}` });
+    setIcon(stamp.createSpan({ cls: "review-md-rev-icon" }), working ? "git-branch" : commit ? "git-commit" : "calendar");
+    stamp.createSpan({
+      text: working ? " working copy" : commit ? ` on ${commit}` : day ? ` on the ${day} version` : " on an earlier version",
+    });
     stamp.title = working
       ? "Comment made on the uncommitted working copy; re-anchors to a commit when the file is committed"
-      : `Comment made on version ${version}`;
-    if (outdated) {
-      const badge = slot.createSpan({ cls: "review-md-outdated" });
-      setIcon(badge, "alert-triangle");
-      badge.createSpan({ text: "outdated" });
-    }
+      : commit
+        ? `Comment made on version ${commit}`
+        : "Comment made on the doc as it was then (this vault isn't a git repo, so there's no commit to show)";
+    if (outdated) renderOutdatedBadge(slot);
   }
 
   /**
@@ -1339,17 +1350,17 @@ export class CommentsView extends ItemView {
   private showCopyMenu(e: MouseEvent, thread: ReviewThread): void {
     const menu = new Menu();
     menu.addItem((i) =>
-      i.setTitle("Copy share link").setIcon("link").onClick(() => void this.copyLink(thread, "share")),
+      i.setTitle("Copy link to this thread").setIcon("link").onClick(() => void this.copyLink(thread, "share")),
     );
     menu.addItem((i) =>
       i
-        .setTitle("Copy native link (works without the plugin)")
+        .setTitle("Copy plain Obsidian link (works without review-md)")
         .setIcon("file-symlink")
         .onClick(() => void this.copyLink(thread, "native")),
     );
     menu.addItem((i) =>
       i
-        .setTitle("Copy reply-link template")
+        .setTitle("Copy reply link for an AI tool or script")
         .setIcon("reply")
         .onClick(() => void this.copyLink(thread, "reply")),
     );
@@ -1363,13 +1374,13 @@ export class CommentsView extends ItemView {
     let label: string;
     if (kind === "native") {
       text = this.plugin.buildNativeLink(this.file, thread);
-      label = "native link";
+      label = "plain Obsidian link";
     } else if (kind === "reply") {
       text = this.plugin.buildReplyUrl(this.file, thread.id, this.author);
-      label = "reply-link template (fill in {{reply}})";
+      label = "reply link (replace {{reply}} with the answer)";
     } else {
       text = this.plugin.buildShareUrl(this.file, thread.id);
-      label = "share link";
+      label = "thread link";
     }
     await navigator.clipboard.writeText(text);
     new Notice(`review-md: ${label} copied`);

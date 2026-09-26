@@ -2,7 +2,7 @@
 
 /* Comment amber — the marker colour for review-md's comment UI. Two surfaces,
    two behaviours, so it stays legible in both themes:
-   - Sidebar chips (the node/edge type badge, the "hidden" filter chip) sit on
+   - Sidebar chips (the node/edge type badge, the "outdated" filter chip) sit on
      Obsidian's own background, so they follow the theme — a deeper set under the
      dark theme blends with the dark sidebar instead of a bright pale pill.
    - Diagram amber (the overlay badges and the recoloured commented node) sits on
@@ -151,8 +151,8 @@ body.theme-dark {
 .review-md-chip.is-empty {
   opacity: 0.35;
 }
-/* The "hidden" chip, when active, tints amber to echo the drift/outdated cue. */
-.review-md-chip[data-cat="hidden"].is-active {
+/* The "outdated" chip, when active, tints amber to echo the drift/outdated cue. */
+.review-md-chip[data-cat="outdated"].is-active {
   color: var(--review-md-amber-text);
   background: var(--review-md-amber-bg);
   border-color: var(--review-md-amber-line);
@@ -243,7 +243,8 @@ body.theme-dark {
 }
 .review-md-tid {
   font-size: var(--font-ui-smaller);
-  color: var(--text-accent);
+  color: var(--text-faint);
+  background: none;
 }
 .review-md-anchor {
   font-size: var(--font-ui-smaller);

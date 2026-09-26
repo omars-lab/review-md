@@ -22,6 +22,34 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
   scan). The manifest and the 0.1.0 assets download without a login, so testers need no
   token. Next: (3) recruit testers.
 
+- **Beta-tester polish from a first-run walkthrough (2026-09-26).** An agent installed the
+  plugin in a fresh vault as a newcomer would and screenshotted each step. Shipped in
+  `feat/beta-polish`:
+  - Fixed: diagram comments now appear in Live Preview without re-focusing the doc.
+  - Fixed: off git, cards no longer show a content hash that looks like a commit.
+  - Chip "hidden" → "outdated".
+  - The outdated badge now has a tooltip saying what it means.
+  - Reviewer name defaults to git's `user.name`.
+  - Version shown in Settings, plus Report an issue (button and command).
+  - Comment mode has its own ribbon icon.
+  - The empty sidebar now says how to start.
+  - Copy menu and commands use plain words.
+  - Only threads with 3+ messages fold.
+  - The AI digest opens with a lead-in, and shows today's text for outdated threads.
+  - README Quick start.
+
+  Still open, by value for the effort:
+  1. **A mark on commented passages in the doc** (M). Only diagrams show that a comment
+     exists; a commented paragraph or link looks untouched. Add a subtle underline or a
+     margin dot that opens the thread.
+  2. **Collapse each card's reply box until the card is focused** (S–M). Today about
+     1.5 cards fit on screen.
+  3. **Anchor-type chips say `text` / `node`** (S). Plain words ("passage", "diagram box")
+     in the sidebar only; `anchorTypeLabel` also feeds the CLI and search, so map it in
+     the view.
+  4. **The CLI's staleness is whole-doc** (agent item 2 below). Until it's fixed, the
+     CLI digest can't show "now reads" the way the plugin's does.
+
 - **More for agents: endpoints to wrap in the `reviews` CLI** — ranked by value for the
   effort (brainstormed 2026-09-25, after the export URL + CLI shipped; gaps 1–2 came out of
   the first dogfood run, [`.claude/skills/reviews/notes.md`](../.claude/skills/reviews/notes.md)).

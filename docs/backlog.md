@@ -45,18 +45,16 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
   - Chips say "passage" / "heading" / "diagram box" / "arrow" (sidebar only; the CLI and
     search keep the type names).
 
-  Still open:
-  1. **The CLI's staleness is whole-doc** (agent item 2 below). Until it's fixed, the
-     CLI digest can't show "now reads" the way the plugin's does.
+  - The CLI now judges "outdated" per passage, like the plugin, and shows "now reads".
 
 - **More for agents: endpoints to wrap in the `reviews` CLI** — ranked by value for the
   effort (brainstormed 2026-09-25, after the export URL + CLI shipped; gaps 1–2 came out of
   the first dogfood run, [`.claude/skills/reviews/notes.md`](../.claude/skills/reviews/notes.md)).
   1. ~~**Resolve / reopen**~~ — **DONE 2026-09-26.** `obsidian://review-md-resolve?file&thread[&state=open]`,
      `reviews resolve <doc> <id> [--reopen]`, and `reviews reply … --resolve`.
-  2. **Per-passage staleness in the CLI** — move the plugin's `isThreadOutdated` logic
-     (hash just the anchored block / node / image when it can) into `src/pure.ts` and use it
-     in `reviews`. Today every thread reads OUTDATED after any edit anywhere in the doc.
+  2. ~~**Per-passage staleness in the CLI**~~ — **DONE 2026-09-26.** `anchorContentIn` in
+     `src/pure.ts` is the one rule; the plugin and `reviews` both use it. Threads written
+     before passage stamps still fall back to the whole-doc hash, in both.
   3. ~~**`--since <time>`**~~ — **DONE 2026-09-26.** On list/find; takes an age (`2h`,
      `3d`) or a date.
   4. **`reviews diff <doc> <id>`** — the anchored passage as the reviewer saw it

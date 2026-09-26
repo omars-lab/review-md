@@ -25,18 +25,31 @@ import {
   stripBlockIds,
   latestTs,
   sinceCutoff,
+  anchorContentIn,
 } from "../src/pure.ts";
 
-// ---- Hashing: the plugin's bodyHash (src/pure.ts) is async Web Crypto; this is the
-// same recipe on node:crypto, pinned equal by test/pure.test.ts. bodyHash is the
-// staleness signal here, so an agent can tell a thread reviewed against the current
-// text from a stale one, off-Obsidian. (The plugin is finer: it checks just the
-// anchored content when it can.)
+// ---- Hashing: the plugin's sha256Short/bodyHash (src/pure.ts) are async Web Crypto;
+// these are the same recipes on node:crypto, pinned equal by test/pure.test.ts.
+function sha256Short(text) {
+  return createHash("sha256").update(text).digest("hex").slice(0, 12);
+}
 function bodyHash(text) {
-  return createHash("sha256")
-    .update(stripBlockIds(stripFrontmatter(text)))
-    .digest("hex")
-    .slice(0, 12);
+  return sha256Short(stripBlockIds(stripFrontmatter(text)));
+}
+
+/** Is a thread outdated, and what does its passage say today? The plugin's rule
+ *  (isThreadOutdated): compare just the anchored passage / box / arrow / image when
+ *  the thread carries an anchorHash, so an edit elsewhere in the doc leaves it
+ *  current; otherwise fall back to the whole-doc hash. `current` is the anchored
+ *  text today (null when it's gone), for the digest's "now reads". */
+function staleness(t, text) {
+  if (text == null || !t.rev) return { outdated: false };
+  const current = anchorContentIn(text, t.anchor ?? {});
+  if (t.rev.anchorHash && current !== undefined) {
+    return { outdated: current === null || sha256Short(current) !== t.rev.anchorHash, current };
+  }
+  const outdated = t.rev.bodyHash ? t.rev.bodyHash !== bodyHash(text) : false;
+  return current === undefined ? { outdated } : { outdated, current };
 }
 
 // ---- Sidecar location: MUST match ReviewMdPlugin.sidecarPathFor.
@@ -70,11 +83,11 @@ function readDoc(file) {
   const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   const review = fmMatch ? parseYaml(fmMatch[1])?.review : null;
   // Missing file or rev → unknown (not flagged stale).
-  const currentHash = existsSync(file) ? bodyHash(readFileSync(file, "utf8")) : null;
+  const text = existsSync(file) ? readFileSync(file, "utf8") : null;
   const threads = (review?.threads ?? []).map((t) => ({
     ...t,
     messages: t.messages ?? [],
-    outdated: t.rev?.bodyHash && currentHash ? t.rev.bodyHash !== currentHash : false,
+    ...staleness(t, text),
   }));
   return { uid: review?.uid ?? null, threads };
 }

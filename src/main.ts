@@ -28,6 +28,9 @@ import {
   bodyHash,
   ordinalsFromLog,
   mermaidBlocksFrom,
+  anchorContentIn,
+  escapeRegExp,
+  MERMAID_SHAPES,
   effectiveReviewer,
   filterThreads,
   threadsDigest,
@@ -180,12 +183,6 @@ function nodeRequire(mod: string): any {
   }
 }
 
-/** Alternation of every mermaid node shape wrapper (`[..]`, `(..)`, `([..])`, …),
- *  longest-first so `[[..]]` wins over `[..]`. Used to pull a node's declared
- *  shape+label out of diagram source. Kept in one place — the preview builders and
- *  the per-anchor staleness check must read node declarations identically. */
-const MERMAID_SHAPES =
-  "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
 
 export default class ReviewMdPlugin extends Plugin {
   /** True while "comment mode" is armed: the reader is click-to-comment. */
@@ -1235,98 +1232,13 @@ export default class ReviewMdPlugin extends Plugin {
     return bodyHash(text);
   }
 
-  /**
-   * The current text of *just what a thread anchors to*, read from the latest file
-   * — the per-anchor staleness signal (a thread is outdated only when ITS content
-   * changed, not when the file changed anywhere; Omar, 2026-09-21):
-   *   - `string`    → the anchored content as it stands now (node declaration, edge
-   *                   link line, block/heading text, image src), normalised.
-   *   - `null`      → the target is gone (node/edge/block/heading/image removed) →
-   *                   the thread is outdated.
-   *   - `undefined` → this anchor can't be precisely extracted → caller falls back
-   *                   to the coarse `bodyHash`.
-   * Normalisation collapses whitespace so reflowing/re-indenting the anchored text
-   * without changing its words doesn't count as a change.
-   */
+  /** The current text of just what a thread anchors to — see `anchorContentIn`
+   *  (src/pure.ts), which the `reviews` CLI shares so both agree on "outdated". */
   async anchorContentFor(
     file: TFile,
     anchor: Record<string, unknown>,
   ): Promise<string | null | undefined> {
-    const a = anchor as {
-      type?: string;
-      node?: string;
-      from?: string;
-      to?: string;
-      quote?: string;
-      blockId?: string;
-      src?: string;
-      href?: string;
-    };
-    const norm = (s: string) => s.replace(/\s+/g, " ").trim();
-    switch (a.type) {
-      case "mermaidNode": {
-        if (!a.node) return undefined;
-        const blocks = await this.mermaidBlocksIn(file);
-        for (const b of blocks) {
-          const dm = b.match(new RegExp(`\\b${escapeRegExp(a.node)}\\s*(${MERMAID_SHAPES})`));
-          if (dm) return norm(`${a.node}${dm[1]}`); // declared node: id + shape/label
-        }
-        // Present but label-less (only ever named as an edge endpoint): its identity
-        // is the id itself, so it's "unchanged" as long as the id still appears.
-        const idRe = new RegExp(`(^|[^\\w])${escapeRegExp(a.node)}([^\\w]|$)`, "m");
-        if (blocks.some((b) => idRe.test(b))) return a.node;
-        return null; // node removed
-      }
-      case "mermaidEdge": {
-        if (!a.from || !a.to) return undefined;
-        const blocks = await this.mermaidBlocksIn(file);
-        const link = new RegExp(
-          `\\b${escapeRegExp(a.from)}\\b[^\\n]*?(?:--+>?|==+>?|-\\.-*>?|~~+)[^\\n]*?\\b${escapeRegExp(a.to)}\\b`,
-        );
-        for (const b of blocks) {
-          const m = b.match(link);
-          if (m) return norm(m[0]);
-        }
-        return null; // edge removed
-      }
-      case "text": {
-        const body = stripFrontmatter(await this.app.vault.read(file));
-        if (a.blockId) {
-          const block = blockTextFor(body, a.blockId);
-          return block == null ? null : norm(block);
-        }
-        if (a.quote) return norm(body).includes(norm(a.quote)) ? norm(a.quote) : null;
-        return undefined; // no durable anchor to check
-      }
-      case "header": {
-        if (!a.quote) return undefined;
-        const body = stripFrontmatter(await this.app.vault.read(file));
-        const q = norm(a.quote);
-        const present = body.split(/\r?\n/).some((l) => {
-          const m = l.match(/^#{1,6}\s+(.*)$/);
-          return m != null && norm(m[1].replace(/\s+\^[A-Za-z0-9_-]+\s*$/, "")) === q;
-        });
-        return present ? q : null;
-      }
-      case "image": {
-        if (!a.src) return undefined;
-        const text = await this.app.vault.read(file);
-        return text.includes(a.src) ? a.src : null;
-      }
-      case "link": {
-        const href = a.href ?? "";
-        const q = a.quote ?? "";
-        if (!href && !q) return undefined;
-        // The link is "still there" as long as its target (href) — or, for a
-        // bare-text link, its display text — appears in the source. href+text
-        // together are the anchored identity, so a change to either is outdated.
-        const text = await this.app.vault.read(file);
-        const present = href ? text.includes(href) : norm(text).includes(norm(q));
-        return present ? norm(`${href} ${q}`) : null;
-      }
-      default:
-        return undefined;
-    }
+    return anchorContentIn(await this.app.vault.read(file), anchor);
   }
 
   /** Hash of a thread's anchored content (see anchorContentFor), or undefined when
@@ -2255,10 +2167,6 @@ export default class ReviewMdPlugin extends Plugin {
   }
 }
 
-/** Escape a string for literal use inside a RegExp. */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /**
  * Read an edge's source/target node ids + parallel-edge index off a mermaid link

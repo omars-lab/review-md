@@ -7380,6 +7380,92 @@ function stripFrontmatter(text) {
 function stripBlockIds(text) {
   return text.replace(/[ \t]+\^[A-Za-z0-9_-]+[ \t]*$/gm, "").replace(/^\^[A-Za-z0-9_-]+[ \t]*$/gm, "");
 }
+function removeBlockIdFromText(text, blockId) {
+  const esc = blockId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(`[ \\t]+\\^${esc}(?=[ \\t]*$)`, "gm"), "").replace(new RegExp(`^\\^${esc}[ \\t]*\\r?\\n?`, "gm"), "");
+}
+function blockTextFor(text, blockId) {
+  const esc = blockId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const idRe = new RegExp(`(^|\\s)\\^${esc}[ \\t]*$`);
+  const lines = text.split(/\r?\n/);
+  const idx = lines.findIndex((l) => idRe.test(l));
+  if (idx < 0) return null;
+  const fence = (l) => /^[ \t]*`{3,}/.test(l);
+  let start = idx;
+  let end = idx;
+  while (start > 0 && lines[start - 1].trim() !== "" && !fence(lines[start - 1])) start--;
+  while (end + 1 < lines.length && lines[end + 1].trim() !== "" && !fence(lines[end + 1])) end++;
+  return removeBlockIdFromText(lines.slice(start, end + 1).join("\n"), blockId).trim();
+}
+function mermaidBlocksFrom(text) {
+  const re = /^[ \t]*`{3,}\s*mermaid\s*\r?\n([\s\S]*?)\r?\n[ \t]*`{3,}\s*$/gm;
+  const blocks = [];
+  let m;
+  while ((m = re.exec(text)) !== null) blocks.push(m[1]);
+  return blocks;
+}
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+var MERMAID_SHAPES = "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
+function anchorContentIn(text, anchor) {
+  const a = anchor;
+  const norm = (s) => s.replace(/\s+/g, " ").trim();
+  switch (a.type) {
+    case "mermaidNode": {
+      if (!a.node) return void 0;
+      const blocks = mermaidBlocksFrom(text);
+      for (const b of blocks) {
+        const dm = b.match(new RegExp(`\\b${escapeRegExp(a.node)}\\s*(${MERMAID_SHAPES})`));
+        if (dm) return norm(`${a.node}${dm[1]}`);
+      }
+      const idRe = new RegExp(`(^|[^\\w])${escapeRegExp(a.node)}([^\\w]|$)`, "m");
+      if (blocks.some((b) => idRe.test(b))) return a.node;
+      return null;
+    }
+    case "mermaidEdge": {
+      if (!a.from || !a.to) return void 0;
+      const link = new RegExp(
+        `\\b${escapeRegExp(a.from)}\\b[^\\n]*?(?:--+>?|==+>?|-\\.-*>?|~~+)[^\\n]*?\\b${escapeRegExp(a.to)}\\b`
+      );
+      for (const b of mermaidBlocksFrom(text)) {
+        const m = b.match(link);
+        if (m) return norm(m[0]);
+      }
+      return null;
+    }
+    case "text": {
+      const body = stripFrontmatter(text);
+      if (a.blockId) {
+        const block = blockTextFor(body, a.blockId);
+        return block == null ? null : norm(block);
+      }
+      if (a.quote) return norm(body).includes(norm(a.quote)) ? norm(a.quote) : null;
+      return void 0;
+    }
+    case "header": {
+      if (!a.quote) return void 0;
+      const q = norm(a.quote);
+      const present = stripFrontmatter(text).split(/\r?\n/).some((l) => {
+        const m = l.match(/^#{1,6}\s+(.*)$/);
+        return m != null && norm(m[1].replace(/\s+\^[A-Za-z0-9_-]+\s*$/, "")) === q;
+      });
+      return present ? q : null;
+    }
+    case "image":
+      if (!a.src) return void 0;
+      return text.includes(a.src) ? a.src : null;
+    case "link": {
+      const href = a.href ?? "";
+      const q = a.quote ?? "";
+      if (!href && !q) return void 0;
+      const present = href ? text.includes(href) : norm(text).includes(norm(q));
+      return present ? norm(`${href} ${q}`) : null;
+    }
+    default:
+      return void 0;
+  }
+}
 function anchorTypeLabel(anchor) {
   switch (String(anchor?.type ?? "unknown")) {
     case "mermaidNode":
@@ -7482,8 +7568,20 @@ function threadsDigest(files, opts = { scope: "vault" }) {
 }
 
 // scripts/reviews.mjs
+function sha256Short(text) {
+  return createHash("sha256").update(text).digest("hex").slice(0, 12);
+}
 function bodyHash(text) {
-  return createHash("sha256").update(stripBlockIds(stripFrontmatter(text))).digest("hex").slice(0, 12);
+  return sha256Short(stripBlockIds(stripFrontmatter(text)));
+}
+function staleness(t, text) {
+  if (text == null || !t.rev) return { outdated: false };
+  const current = anchorContentIn(text, t.anchor ?? {});
+  if (t.rev.anchorHash && current !== void 0) {
+    return { outdated: current === null || sha256Short(current) !== t.rev.anchorHash, current };
+  }
+  const outdated = t.rev.bodyHash ? t.rev.bodyHash !== bodyHash(text) : false;
+  return current === void 0 ? { outdated } : { outdated, current };
 }
 function sidecarPathFor(file) {
   return join(dirname(file), `.${basename(file, extname(file))}.comments.md`);
@@ -7509,11 +7607,11 @@ function readDoc(file) {
   const raw = readFileSync(sidecarPathFor(file), "utf8");
   const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   const review = fmMatch ? (0, import_yaml.parse)(fmMatch[1])?.review : null;
-  const currentHash = existsSync(file) ? bodyHash(readFileSync(file, "utf8")) : null;
+  const text = existsSync(file) ? readFileSync(file, "utf8") : null;
   const threads = (review?.threads ?? []).map((t) => ({
     ...t,
     messages: t.messages ?? [],
-    outdated: t.rev?.bodyHash && currentHash ? t.rev.bodyHash !== currentHash : false
+    ...staleness(t, text)
   }));
   return { uid: review?.uid ?? null, threads };
 }

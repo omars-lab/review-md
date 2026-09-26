@@ -26,6 +26,7 @@ import {
   blockTextFor,
   sha256Short,
   bodyHash,
+  anchorContentIn,
   ordinalsFromLog,
   revKeyOf,
   revLabelFor,
@@ -535,4 +536,29 @@ test("threadsDigest: a lead-in says what to do, and outdated threads show today'
   assert.match(out, /### \[t2\][^\n]*\nreviewed against: [^\n]*\nnow: \(no longer in the doc\)/);
   assert.doesNotMatch(out, /ignored when not outdated/);
   assert.doesNotMatch(threadsDigest([], { scope: "x" }), /These are review comments/);
+});
+
+test("anchorContentIn: a passage's own text, so edits elsewhere leave it alone", () => {
+  const doc = "---\na: 1\n---\nFirst   para.\n^p1\n\nSecond para. ^p2\n\n## Setup\n\n![](img/a.png) [docs](https://x.y)\n";
+  assert.equal(anchorContentIn(doc, { type: "text", blockId: "p2" }), "Second para.");
+  assert.equal(anchorContentIn(doc, { type: "text", blockId: "gone" }), null);
+  assert.equal(anchorContentIn(doc, { type: "text", quote: "Second  para." }), "Second para.");
+  assert.equal(anchorContentIn(doc, { type: "text" }), undefined);
+  assert.equal(anchorContentIn(doc, { type: "header", quote: "Setup" }), "Setup");
+  assert.equal(anchorContentIn(doc, { type: "header", quote: "Install" }), null);
+  assert.equal(anchorContentIn(doc, { type: "image", src: "img/a.png" }), "img/a.png");
+  assert.equal(anchorContentIn(doc, { type: "link", href: "https://x.y", quote: "docs" }), "https://x.y docs");
+  assert.equal(anchorContentIn(doc, { type: "link", href: "https://gone" }), null);
+  // an edit to another paragraph doesn't change p2's content
+  const edited = doc.replace("First   para.", "First paragraph, reworded.");
+  assert.equal(anchorContentIn(edited, { type: "text", blockId: "p2" }), anchorContentIn(doc, { type: "text", blockId: "p2" }));
+});
+
+test("anchorContentIn: diagram boxes and arrows read from mermaid fences only", () => {
+  const doc = "A is prose.\n\n```mermaid\nflowchart LR\n  A[Start] --> B\n```\n";
+  assert.equal(anchorContentIn(doc, { type: "mermaidNode", node: "A" }), "A[Start]");
+  assert.equal(anchorContentIn(doc, { type: "mermaidNode", node: "B" }), "B");
+  assert.equal(anchorContentIn(doc, { type: "mermaidNode", node: "C" }), null);
+  assert.equal(anchorContentIn(doc, { type: "mermaidEdge", from: "A", to: "B" }), "A[Start] --> B");
+  assert.equal(anchorContentIn(doc, { type: "mermaidEdge", from: "B", to: "A" }), null);
 });

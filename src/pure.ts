@@ -140,6 +140,100 @@ export function mermaidBlocksFrom(text: string): string[] {
   return blocks;
 }
 
+/** Escape a string for literal use inside a RegExp. */
+export function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Every mermaid node shape, as a regex alternation — for reading a node's
+ *  shape+label out of diagram source. Kept in one place: the preview builders and
+ *  the per-passage staleness check must read node declarations the same way. */
+export const MERMAID_SHAPES =
+  "\\[\\[.*?\\]\\]|\\(\\(.*?\\)\\)|\\(\\[.*?\\]\\)|\\[\\(.*?\\)\\]|\\{\\{.*?\\}\\}|\\[.*?\\]|\\(.*?\\)|\\{.*?\\}|>.*?\\]";
+
+/**
+ * Just the content a thread points at, as it reads in `text` (the whole file) today —
+ * what the per-passage staleness check hashes, and what "now reads" shows. Shared
+ * by the plugin and the `reviews` CLI so both call the same threads outdated.
+ *   - a string → the anchored content (whitespace collapsed, so reflowing text
+ *     doesn't count as a change)
+ *   - `null` → the anchored thing is gone from the doc
+ *   - `undefined` → this anchor can't be pinned down; fall back to the whole-doc hash
+ */
+export function anchorContentIn(text: string, anchor: Record<string, unknown>): string | null | undefined {
+  const a = anchor as {
+    type?: string;
+    node?: string;
+    from?: string;
+    to?: string;
+    quote?: string;
+    blockId?: string;
+    src?: string;
+    href?: string;
+  };
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+  switch (a.type) {
+    case "mermaidNode": {
+      if (!a.node) return undefined;
+      const blocks = mermaidBlocksFrom(text);
+      for (const b of blocks) {
+        const dm = b.match(new RegExp(`\\b${escapeRegExp(a.node)}\\s*(${MERMAID_SHAPES})`));
+        if (dm) return norm(`${a.node}${dm[1]}`); // declared node: id + shape/label
+      }
+      // Present but label-less (only ever named as an edge endpoint): its identity
+      // is the id itself, so it's "unchanged" as long as the id still appears.
+      const idRe = new RegExp(`(^|[^\\w])${escapeRegExp(a.node)}([^\\w]|$)`, "m");
+      if (blocks.some((b) => idRe.test(b))) return a.node;
+      return null; // node removed
+    }
+    case "mermaidEdge": {
+      if (!a.from || !a.to) return undefined;
+      const link = new RegExp(
+        `\\b${escapeRegExp(a.from)}\\b[^\\n]*?(?:--+>?|==+>?|-\\.-*>?|~~+)[^\\n]*?\\b${escapeRegExp(a.to)}\\b`,
+      );
+      for (const b of mermaidBlocksFrom(text)) {
+        const m = b.match(link);
+        if (m) return norm(m[0]);
+      }
+      return null; // edge removed
+    }
+    case "text": {
+      const body = stripFrontmatter(text);
+      if (a.blockId) {
+        const block = blockTextFor(body, a.blockId);
+        return block == null ? null : norm(block);
+      }
+      if (a.quote) return norm(body).includes(norm(a.quote)) ? norm(a.quote) : null;
+      return undefined; // no durable anchor to check
+    }
+    case "header": {
+      if (!a.quote) return undefined;
+      const q = norm(a.quote);
+      const present = stripFrontmatter(text)
+        .split(/\r?\n/)
+        .some((l) => {
+          const m = l.match(/^#{1,6}\s+(.*)$/);
+          return m != null && norm(m[1].replace(/\s+\^[A-Za-z0-9_-]+\s*$/, "")) === q;
+        });
+      return present ? q : null;
+    }
+    case "image":
+      if (!a.src) return undefined;
+      return text.includes(a.src) ? a.src : null;
+    case "link": {
+      const href = a.href ?? "";
+      const q = a.quote ?? "";
+      if (!href && !q) return undefined;
+      // Still there as long as its target (href) — or, for a bare-text link, its
+      // display text — appears; href+text together are the anchored identity.
+      const present = href ? text.includes(href) : norm(text).includes(norm(q));
+      return present ? norm(`${href} ${q}`) : null;
+    }
+    default:
+      return undefined;
+  }
+}
+
 /** Identity of the revision a thread was authored against — the SAME value the
  *  card's version stamp shows: a git commit (incl. WORKING_REV) when the file was
  *  tracked, else the body-hash. `null` for an unstamped thread. */

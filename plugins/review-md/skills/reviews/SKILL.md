@@ -36,8 +36,9 @@ rather than guessing flags.
    messages since then.
 3. **Act on each thread.** Read the anchor (what the thread points at — a passage, a
    diagram node or edge, an image, a link) and the messages. Then change the doc, or
-   answer the question. **OUTDATED** means the doc changed since the thread was
-   written — read the current text before answering; the point may already be handled.
+   answer the question. **OUTDATED** means the commented passage changed since the
+   thread was written (`now reads:` shows it today) — the point may already be handled.
+   Older threads without a passage stamp go OUTDATED on any edit to the doc.
    `reviewed against: <commit>` shows what the reviewer saw: `git show <commit>:<path>`.
 4. **Reply on the thread** with what you did, naming the commit if you changed the doc:
    `reviews reply <doc.md> <id> "Reworded in abc123 — …" --author claude`.

@@ -70,8 +70,11 @@ into `docs/pocs/` or `docs/issues/` if/when picked up.
      opens its `x-success` with `count`, `digest` and `truncated` added. The digest is cut
      at 30,000 characters (`DIGEST_URL_MAX`), since receiving apps often cap URLs; the
      clipboard and the CLI still have the whole thing.
-  7. **MCP server over the CLI** — list/find/show/reply as MCP tools so any agent host
-     gets them without shell access. Largest; worth it once 1–3 exist.
+  7. ~~**MCP server over the CLI**~~ — **DONE 2026-09-26.** `plugins/review-md/bin/reviews-mcp.mjs`
+     is a single file with no dependencies. Each tool (list/find/show/diff/stats/reply/comment/
+     resolve) runs the bundled CLI, so the logic still lives in one place. The Claude Code
+     plugin turns it on through `.mcp.json`. Tested with headless `claude -p` and only this
+     server loaded: `stats` and `find` returned the right results.
 
 ## Deferred
 

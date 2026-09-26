@@ -19,6 +19,7 @@ import { resolve, join, basename } from "node:path";
 
 const repo = resolve(import.meta.dirname, "..");
 const CLI_OUT = join(repo, "plugins/review-md/bin/reviews.mjs");
+const MCP_OUT = join(repo, "plugins/review-md/bin/reviews-mcp.mjs");
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const notesIdx = args.indexOf("--notes");
@@ -45,7 +46,8 @@ if (!versions[version])
 // --- 2. Built artifacts present (the release assets). ---
 // main.js + manifest.json + styles.css are what BRAT and the store download, one by
 // one. The zip holds the same three in a review-md/ folder, for a manual install:
-// unzip into <vault>/.obsidian/plugins/. reviews.mjs is the standalone CLI.
+// unzip into <vault>/.obsidian/plugins/. reviews.mjs is the standalone CLI;
+// reviews-mcp.mjs, kept beside it, serves the same commands as MCP tools.
 const pluginFiles = ["main.js", "manifest.json", "styles.css"];
 for (const f of pluginFiles) if (!existsSync(join(repo, f))) die(`missing ${f} — run \`npm run build\` first`);
 if (!existsSync(CLI_OUT)) die(`missing ${CLI_OUT} — run \`make cli\` first`);
@@ -82,7 +84,8 @@ mkdirSync(join(dist, "review-md"), { recursive: true });
 for (const f of pluginFiles) copyFileSync(join(repo, f), join(dist, "review-md", f));
 execFileSync("zip", ["-qr", zipName, "review-md"], { cwd: dist });
 copyFileSync(CLI_OUT, join(dist, "reviews.mjs"));
-const assets = [...pluginFiles, join(dist, zipName), join(dist, "reviews.mjs")];
+copyFileSync(MCP_OUT, join(dist, "reviews-mcp.mjs"));
+const assets = [...pluginFiles, join(dist, zipName), join(dist, "reviews.mjs"), join(dist, "reviews-mcp.mjs")];
 
 const head = git(["rev-parse", "--short", "HEAD"]);
 console.log(`release: review-md ${version} @ ${head}`);
@@ -109,6 +112,7 @@ const body =
     "```",
     "",
     "**CLI only**: `reviews.mjs` needs just Node 18+ — `node reviews.mjs help`.",
+    "**MCP tools** for any MCP host: `reviews-mcp.mjs` next to `reviews.mjs`, run as `node reviews-mcp.mjs`.",
     "",
   ].join("\n");
 execFileSync(

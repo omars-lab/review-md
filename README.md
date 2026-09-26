@@ -212,7 +212,8 @@ No auto-update: repeat with the next release's zip.
 
 ### Claude Code plugin
 
-The agent side: a `reviews` skill plus the `reviews` command line, so Claude Code can
+The agent side: a `reviews` skill, the `reviews` command line, and the same commands
+as [MCP tools](#as-mcp-tools), so Claude Code can
 find, answer and reply to review threads in any repo. Two lines in Claude Code:
 
 ```
@@ -294,7 +295,24 @@ the [dogfood copy](.claude/skills/reviews/SKILL.md) runs it from source and logs
 the CLI was missing in [`notes.md`](.claude/skills/reviews/notes.md), which is where the
 next features come from.
 
-No shell? From inside Obsidian, **Copy open threads for AI** or
+### As MCP tools
+
+For an agent host that can't run shell commands (Claude Desktop, Cursor, any MCP client), the
+same commands are MCP tools: `list`, `find`, `show`, `diff`, `stats`, `reply`, `comment`,
+`resolve`. Each tool call runs the `reviews` CLI, so both behave the same. Installing the
+Claude Code plugin turns the tools on. For any other host, download `reviews.mjs` and
+`reviews-mcp.mjs` from the release, keep them in the same folder, and add:
+
+```json
+{ "mcpServers": { "reviews": { "command": "node", "args": ["/path/to/reviews-mcp.mjs"] } } }
+```
+
+Relative paths in tool calls start from the folder the host launches the server in. If
+you're not sure which folder that is, use absolute paths.
+
+### No shell
+
+From inside Obsidian, **Copy open threads for AI** or
 `obsidian://review-md-export?vault=<vault>[&file=<path>][&text=<words>][&resolved=include]`
 puts the same digest on the clipboard. Add `&x-success=<your-url>` to get it back
 without the clipboard: the URL is opened with `count`, `digest` and `truncated` added

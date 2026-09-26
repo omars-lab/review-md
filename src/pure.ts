@@ -445,6 +445,22 @@ export function anchorLineIn(body: string, anchor: Record<string, unknown>): num
   }
 }
 
+/** Which source lines carry open comments, for the mark beside a commented
+ *  passage. Line (0-based, in `text` as given) → thread ids, in thread order.
+ *  Diagram threads are left out: diagrams mark their own nodes and arrows. */
+export function commentedLines(text: string, threads: ThreadLike[]): Map<number, string[]> {
+  const out = new Map<number, string[]>();
+  for (const t of threads) {
+    if (t.resolved) continue;
+    const type = String(t.anchor?.type ?? "");
+    if (type === "mermaidNode" || type === "mermaidEdge") continue;
+    const line = anchorLineIn(text, t.anchor);
+    if (line === null) continue;
+    out.set(line, [...(out.get(line) ?? []), t.id]);
+  }
+  return out;
+}
+
 /** Threads with more than this many messages start folded to their last one. */
 export const FOLD_OVER = 3;
 

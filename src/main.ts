@@ -11,8 +11,11 @@ import {
   debounce,
   normalizePath,
   parseYaml,
+  setIcon,
   stringifyYaml,
 } from "obsidian";
+import { RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
+import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import xcallbackSchema from "./protocol/xcallback.schema.json";
 import { CommentsView, VIEW_TYPE_COMMENTS } from "./views/comments-view";
 import {
@@ -28,6 +31,7 @@ import {
   effectiveReviewer,
   filterThreads,
   threadsDigest,
+  commentedLines,
   type DigestFile,
   type ExportFilter,
 } from "./pure";
@@ -142,6 +146,31 @@ function cmOf(editor: Editor): CmEditorView | null {
   return (editor as unknown as { cm?: CmEditorView }).cm ?? null;
 }
 
+/** Live Preview's mark beside a commented passage: a line class on each
+ *  commented source line. The plugin sends the line numbers in after each scan;
+ *  in between, edits carry the marks along with the text. */
+const setCommentedLines = StateEffect.define<number[]>();
+const COMMENTED_LINE = Decoration.line({ class: "review-md-commented-line" });
+const commentedLineField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (!e.is(setCommentedLines)) continue;
+      const b = new RangeSetBuilder<Decoration>();
+      for (const n of e.value) {
+        if (n >= 0 && n < tr.state.doc.lines) {
+          const from = tr.state.doc.line(n + 1).from;
+          b.add(from, from, COMMENTED_LINE);
+        }
+      }
+      deco = b.finish();
+    }
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
 /** Node's `require`, or undefined on mobile / restricted renderers. */
 function nodeRequire(mod: string): any {
   try {
@@ -184,6 +213,8 @@ export default class ReviewMdPlugin extends Plugin {
    *  guards a host mid-apply so our own badge writes don't re-enter. */
   private rvObservers = new WeakMap<MarkdownView, MutationObserver>();
   private rvAugmenting = new WeakSet<HTMLElement>();
+  /** The commented lines last sent to each Live Preview editor. */
+  private lpMarked = new WeakMap<MarkdownView, string>();
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -324,6 +355,7 @@ export default class ReviewMdPlugin extends Plugin {
     // here (in a post-processor), not on an arbitrary click — so we cache it onto
     // the DOM. Line numbers shift on edit, so this is read fresh at click time,
     // never trusted stale. See docs/issues/durable-anchoring.md.
+    this.registerEditorExtension(commentedLineField);
     this.registerMarkdownPostProcessor((el, ctx) => {
       const info = ctx.getSectionInfo(el);
       if (!info) return;
@@ -451,12 +483,12 @@ export default class ReviewMdPlugin extends Plugin {
   private ensureLivePreviewAugmenter(view: MarkdownView): void {
     if (view.getMode?.() !== "source") return;
     if (this.lpObservers.has(view)) {
-      void this.scanLivePreviewMermaid(view);
+      void this.scanLivePreview(view);
       return;
     }
     const cm = cmOf(view.editor);
     if (!cm) return;
-    const scan = debounce(() => void this.scanLivePreviewMermaid(view), 120, false);
+    const scan = debounce(() => void this.scanLivePreview(view), 120, false);
     const obs = new MutationObserver(scan);
     obs.observe(cm.contentDOM, { childList: true, subtree: true });
     this.lpObservers.set(view, obs);
@@ -468,7 +500,7 @@ export default class ReviewMdPlugin extends Plugin {
       obs.disconnect();
       this.lpObservers.delete(view);
     });
-    void this.scanLivePreviewMermaid(view);
+    void this.scanLivePreview(view);
   }
 
   /** Attach a debounced MutationObserver to the reading view's render container
@@ -480,7 +512,7 @@ export default class ReviewMdPlugin extends Plugin {
   private ensureReadingViewAugmenter(view: MarkdownView): void {
     if (view.getMode?.() === "source") return;
     if (this.rvObservers.has(view)) {
-      void this.scanReadingViewMermaid(view);
+      void this.scanReadingView(view);
       return;
     }
     // `previewMode.containerEl` is the stable per-view reading-view element; its
@@ -489,7 +521,7 @@ export default class ReviewMdPlugin extends Plugin {
       (view.previewMode as unknown as { containerEl?: HTMLElement } | undefined)?.containerEl ??
       (view.containerEl.querySelector(".markdown-reading-view") as HTMLElement | null);
     if (!container) return;
-    const scan = debounce(() => void this.scanReadingViewMermaid(view), 120, false);
+    const scan = debounce(() => void this.scanReadingView(view), 120, false);
     const obs = new MutationObserver(scan);
     obs.observe(container, { childList: true, subtree: true });
     this.rvObservers.set(view, obs);
@@ -499,7 +531,83 @@ export default class ReviewMdPlugin extends Plugin {
       obs.disconnect();
       this.rvObservers.delete(view);
     });
-    void this.scanReadingViewMermaid(view);
+    void this.scanReadingView(view);
+  }
+
+  /** Everything a reading view shows about comments: marks beside commented
+   *  passages, then the diagram overlay. */
+  private async scanReadingView(view: MarkdownView): Promise<void> {
+    await this.markReadingViewPassages(view);
+    await this.scanReadingViewMermaid(view);
+  }
+
+  /** The same for Live Preview. */
+  private async scanLivePreview(view: MarkdownView): Promise<void> {
+    await this.markLivePreviewPassages(view);
+    await this.scanLivePreviewMermaid(view);
+  }
+
+  /** Reading view: an accent bar and a speech-bubble button beside each section
+   *  that holds an open comment. The button opens the thread. Sections carry
+   *  their source lines (the post-processor stamps them), so the match is by line.
+   *  A section is only touched when its comments change, so this doesn't loop
+   *  with the view's watcher. */
+  private async markReadingViewPassages(view: MarkdownView): Promise<void> {
+    if (view.getMode?.() === "source") return;
+    const file = view.file;
+    const container =
+      (view.previewMode as unknown as { containerEl?: HTMLElement } | undefined)?.containerEl ??
+      (view.containerEl.querySelector(".markdown-reading-view") as HTMLElement | null);
+    if (!file || !container) return;
+    const sections = Array.from(container.querySelectorAll<HTMLElement>("[data-review-md-line-start]"));
+    if (!sections.length) return;
+    const lines = commentedLines(await this.app.vault.cachedRead(file), await this.readThreads(file));
+    for (const sec of sections) {
+      const start = Number(sec.dataset.reviewMdLineStart);
+      const end = Number(sec.dataset.reviewMdLineEnd);
+      const ids = [...lines].filter(([l]) => l >= start && l <= end).flatMap(([, t]) => t);
+      if ((sec.dataset.reviewMdThreads ?? "") === ids.join(",")) continue;
+      sec.querySelector(":scope > .review-md-passage-mark")?.remove();
+      if (!ids.length) {
+        delete sec.dataset.reviewMdThreads;
+        sec.removeClass("review-md-commented");
+        continue;
+      }
+      sec.dataset.reviewMdThreads = ids.join(",");
+      sec.addClass("review-md-commented");
+      const n = ids.length;
+      const mark = sec.createEl("button", {
+        cls: "review-md-passage-mark clickable-icon",
+        attr: { "data-thread": ids[0], "aria-label": n > 1 ? `${n} comments — open` : "Open comment" },
+      });
+      setIcon(mark, "message-square");
+      if (n > 1) mark.createSpan({ text: String(n) });
+      mark.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void this.openThreadInSidebar(ids[0]);
+      };
+    }
+  }
+
+  /** Live Preview: the line marks (see commentedLineField). Sends new line
+   *  numbers only when they changed, so edits and re-scans don't churn. */
+  private async markLivePreviewPassages(view: MarkdownView): Promise<void> {
+    if (view.getMode?.() !== "source") return;
+    const cm = cmOf(view.editor) as unknown as EditorView | null;
+    const file = view.file;
+    if (!cm || !file) return;
+    const lines = [...commentedLines(view.editor.getValue(), await this.readThreads(file)).keys()].sort((a, b) => a - b);
+    const key = lines.join(",");
+    if (this.lpMarked.get(view) === key) return;
+    this.lpMarked.set(view, key);
+    cm.dispatch({ effects: setCommentedLines.of(lines) });
+  }
+
+  /** Show the sidebar with this thread selected. */
+  private async openThreadInSidebar(threadId: string): Promise<void> {
+    await this.activateCommentsView();
+    this.focusThreadInSidebar(threadId);
   }
 
   /** Find each rendered mermaid diagram in a reading view and augment any that
@@ -769,9 +877,9 @@ export default class ReviewMdPlugin extends Plugin {
       return;
     }
 
-    // An injected edge badge opens its existing thread (same rule: don't comment
-    // on a comment).
-    const edgeBadge = target.closest<HTMLElement>(".review-md-edge-badge");
+    // An injected edge badge or passage mark opens its existing thread (same
+    // rule: don't comment on a comment).
+    const edgeBadge = target.closest<HTMLElement>(".review-md-edge-badge, .review-md-passage-mark");
     if (edgeBadge) {
       const tid = edgeBadge.dataset.thread;
       if (tid) {
@@ -1017,7 +1125,7 @@ export default class ReviewMdPlugin extends Plugin {
       .map((l) => l.view)
       .filter((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path)
       .forEach((v) => {
-        if (v.getMode?.() === "source") void this.scanLivePreviewMermaid(v);
+        if (v.getMode?.() === "source") void this.scanLivePreview(v);
         else {
           v.previewMode?.rerender(true);
           this.rescanReadingViewSoon(v);
@@ -1031,7 +1139,7 @@ export default class ReviewMdPlugin extends Plugin {
    *  the diagram were wiped, until the doc tab was focused again. The scan skips
    *  diagrams that are already marked, so extra passes cost nothing. */
   private rescanReadingViewSoon(view: MarkdownView): void {
-    for (const ms of [50, 250, 750, 1500]) window.setTimeout(() => void this.scanReadingViewMermaid(view), ms);
+    for (const ms of [50, 250, 750, 1500]) window.setTimeout(() => void this.scanReadingView(view), ms);
   }
 
   /** Push a new thread onto the file's sidecar and return its id. When

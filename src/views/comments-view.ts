@@ -49,6 +49,14 @@ interface Transient {
   scrollTop: number;
 }
 
+/** The card chip's words. `anchorTypeLabel` stays short for the CLI, search and
+ *  the chip's `data-type` styling; people see these. */
+const PLAIN_TYPE: Record<string, string> = { text: "passage", header: "heading", node: "diagram box", edge: "arrow" };
+function plainTypeLabel(anchor: Record<string, unknown>): string {
+  const t = anchorTypeLabel(anchor);
+  return PLAIN_TYPE[t] ?? t;
+}
+
 /** The amber "outdated" badge on a card's version row, with a tooltip that says
  *  what it means and what to do about it. */
 function renderOutdatedBadge(parent: HTMLElement): void {
@@ -713,7 +721,7 @@ export class CommentsView extends ItemView {
     // description stays as the tooltip.
     top.createEl("span", {
       cls: "review-md-type-badge",
-      text: anchorTypeLabel(thread.anchor),
+      text: plainTypeLabel(thread.anchor),
       attr: { "data-type": anchorTypeLabel(thread.anchor), title: describeAnchor(thread.anchor) },
     });
     const resolvedTag = top.createEl("span", { cls: "review-md-resolved-tag", text: "resolved" });
@@ -955,7 +963,7 @@ export class CommentsView extends ItemView {
     const top = card.createDiv({ cls: "review-md-thread-top" });
     top.createEl("span", {
       cls: "review-md-type-badge",
-      text: anchorTypeLabel(anchor),
+      text: plainTypeLabel(anchor),
       attr: { "data-type": anchorTypeLabel(anchor), title: describeAnchor(anchor) },
     });
     top.createEl("span", { cls: "review-md-draft-tag", text: "new comment" });

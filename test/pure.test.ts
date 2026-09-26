@@ -38,6 +38,7 @@ import {
   sortThreads,
   latestTs,
   anchorLineIn,
+  commentedLines,
   startsFolded,
   FOLD_OVER,
   anchorWhere,
@@ -450,6 +451,22 @@ test("anchorLineIn image and link: the source line, image by file name when src 
   assert.equal(anchorLineIn(BODY, { type: "link", href: "docs/api/index.md" }), 19);
   assert.equal(anchorLineIn(BODY, { type: "link", href: "https://elsewhere", quote: "the API" }), 19);
   assert.equal(anchorLineIn(BODY, { type: "mystery" }), null);
+});
+
+test("commentedLines: open passage threads by line, diagrams and resolved left out", () => {
+  const text = "# Title\n\nFirst para. ^a1\n\nSecond para mentions [[api]].\n";
+  const lines = commentedLines(text, [
+    thread("t1", { anchor: { type: "text", blockId: "a1" } }),
+    thread("t2", { anchor: { type: "text", blockId: "a1" } }),
+    thread("t3", { anchor: { type: "link", href: "api" } }),
+    thread("t4", { anchor: { type: "header", quote: "Title" }, resolved: true }),
+    thread("t5", { anchor: { type: "mermaidNode", node: "A" } }),
+    thread("t6", { anchor: { type: "text", quote: "not in the doc" } }),
+  ]);
+  assert.deepEqual([...lines], [
+    [2, ["t1", "t2"]],
+    [4, ["t3"]],
+  ]);
 });
 
 test("startsFolded: resolved threads and threads longer than FOLD_OVER start folded", () => {

@@ -92,6 +92,7 @@ npm run reviews -- find "frontmatter" docs               # threads mentioning so
 npm run reviews -- show path/to/design.md d1a2b3         # one thread in full
 npm run reviews -- reply path/to/design.md d1a2b3 "Done in abc123." --author claude
 npm run reviews -- open path/to/design.md d1a2b3         # jump to it in Obsidian
+npm run reviews -- watch docs --exclude-author claude   # one line per new comment/reply/resolve, as they arrive
 ```
 
 The Markdown output is the same digest as the plugin's "Copy open threads for

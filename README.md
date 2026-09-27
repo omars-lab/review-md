@@ -302,7 +302,17 @@ reviews reply docs/designs/design.md d1a2b3 "Fixed in abc123." --resolve   # ans
 reviews resolve docs/designs/design.md d1a2b3 [--reopen]
 reviews comment docs/designs/design.md "Say what happens on timeout." --quote "retries"   # start a thread
 reviews comment docs/designs/design.md "Who owns this?" --node Plugin   # …on a diagram box (--from/--to for an arrow)
+reviews watch docs --exclude-author claude     # keep running: a line per new comment, reply or resolve
 ```
+
+`reviews watch <folder>` keeps running and prints one line per change as it lands —
+`thread_new`, `message_new`, `thread_resolved`, `thread_reopened`, `anchor_lost`,
+`thread_removed`, `file_renamed` — each as
+`<UTC time> pid=<n> ev=<event> file=<path> thread=<id> author=<name> msg="…"` (or JSON
+with `--json`). Run it under a long-running monitor so an agent notices comments left
+while it works; `--exclude-author claude` keeps its own replies from waking it,
+`--replay` first emits every thread already open, and `--once --state <file>` does a
+single "what changed since last time" pass for cron. It never writes a comments file.
 
 Add `--json` to `list`/`find`/`show`/`diff`/`stats` for structured output. The data format and
 exit codes are in [`docs/agent-contract.md`](docs/agent-contract.md). `reply`,

@@ -7366,7 +7366,7 @@ var require_dist = __commonJS({
 
 // scripts/reviews.mjs
 var import_yaml = __toESM(require_dist(), 1);
-import { readFileSync, existsSync, statSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, renameSync, watch as fsWatch } from "node:fs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { dirname, join, basename, extname, relative, resolve } from "node:path";
@@ -7635,6 +7635,171 @@ function threadsDigest(files, opts = { scope: "vault" }) {
   return lines.join("\n") + "\n";
 }
 
+// src/watch.ts
+var RESOLVE_ATTRIBUTION_MS = 2 * 6e4;
+function resolveAuthor(t, now) {
+  const last = t.messages.at(-1);
+  if (!last || now === void 0) return "";
+  const at = Date.parse(last.ts);
+  return !Number.isNaN(at) && now - at >= 0 && now - at <= RESOLVE_ATTRIBUTION_MS ? last.author : "";
+}
+var msgKey = (m) => `${m.author}\0${m.ts}\0${m.body}`;
+var whoKey = (m) => `${m.author}\0${m.ts}`;
+function parseSidecar(raw, parseYaml2) {
+  const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fm) return null;
+  let review;
+  try {
+    review = parseYaml2(fm[1])?.review;
+  } catch {
+    return null;
+  }
+  if (!review || typeof review !== "object") return null;
+  const threads = Array.isArray(review.threads) ? review.threads : [];
+  return {
+    uid: typeof review.uid === "string" ? review.uid : null,
+    threads: threads.filter((t) => t && typeof t.id === "string").map((t) => ({
+      id: t.id,
+      resolved: !!t.resolved,
+      anchor: t.anchor ?? {},
+      messages: (Array.isArray(t.messages) ? t.messages : []).map((m) => ({
+        author: String(m?.author ?? ""),
+        ts: String(m?.ts ?? ""),
+        body: String(m?.body ?? "")
+      }))
+    }))
+  };
+}
+function diffDoc(file, before, after, now) {
+  const out = [];
+  const prev = new Map(before.map((t) => [t.id, t]));
+  const next = new Set(after.map((t) => t.id));
+  for (const t of after) {
+    const old = prev.get(t.id);
+    if (!old) {
+      const first = t.messages[0];
+      out.push({ ev: "thread_new", file, thread: t.id, author: first?.author ?? "", msg: first?.body ?? "" });
+      for (const m of t.messages.slice(1)) out.push({ ev: "message_new", file, thread: t.id, author: m.author, msg: m.body });
+      if (!t.resolved && t.lost) out.push({ ev: "anchor_lost", file, thread: t.id, author: "", msg: first?.body ?? "" });
+      continue;
+    }
+    const seen = new Set(old.messages.map(msgKey));
+    const who = new Map(old.messages.map((m) => [whoKey(m), m.body]));
+    for (const m of t.messages) {
+      if (seen.has(msgKey(m))) continue;
+      const edited = who.has(whoKey(m));
+      out.push({ ev: edited ? "message_edited" : "message_new", file, thread: t.id, author: m.author, msg: m.body });
+    }
+    if (old.resolved !== t.resolved) {
+      out.push({
+        ev: t.resolved ? "thread_resolved" : "thread_reopened",
+        file,
+        thread: t.id,
+        author: resolveAuthor(t, now),
+        msg: t.messages.at(-1)?.body ?? ""
+      });
+    }
+    if (!t.resolved && t.lost && !(old.lost && !old.resolved)) {
+      out.push({ ev: "anchor_lost", file, thread: t.id, author: "", msg: t.messages.at(-1)?.body ?? "" });
+    }
+  }
+  for (const t of before) {
+    if (!next.has(t.id)) out.push({ ev: "thread_removed", file, thread: t.id, author: "", msg: t.messages.at(-1)?.body ?? "" });
+  }
+  return out;
+}
+function sameDoc(a, b) {
+  if (a.uid && b.uid) return a.uid === b.uid;
+  const ids = (d) => d.threads.map((t) => t.id).sort().join("\0");
+  return a.threads.length > 0 && ids(a) === ids(b);
+}
+function excluded(e, exclude) {
+  return !!e.author && exclude.has(e.author.toLowerCase());
+}
+function diffSnapshots(prev, next, opts = {}) {
+  const unreadable = new Set(opts.unreadable ?? []);
+  const missedBefore = new Set(opts.missing ?? []);
+  const exclude = new Set((opts.exclude ?? []).map((a) => a.toLowerCase()));
+  const snapshot = { ...next };
+  for (const f of unreadable) {
+    delete snapshot[f];
+    if (prev[f]) snapshot[f] = prev[f];
+  }
+  const gone = Object.keys(prev).filter((f) => !(f in snapshot));
+  const arrived = Object.keys(snapshot).filter((f) => !(f in prev));
+  const renamedFrom = /* @__PURE__ */ new Map();
+  for (const f of arrived) {
+    const old = gone.find((g) => ![...renamedFrom.values()].includes(g) && sameDoc(prev[g], snapshot[f]));
+    if (old) renamedFrom.set(f, old);
+  }
+  const paired = new Set(renamedFrom.values());
+  const missing = [];
+  for (const g of gone) {
+    if (paired.has(g) || missedBefore.has(g)) continue;
+    snapshot[g] = prev[g];
+    missing.push(g);
+  }
+  const events = [];
+  const files = [.../* @__PURE__ */ new Set([...Object.keys(prev), ...Object.keys(snapshot)])].sort();
+  for (const f of files) {
+    if (paired.has(f)) continue;
+    const from = renamedFrom.get(f);
+    if (from) events.push({ ev: "file_renamed", file: f, from });
+    const before = (from ? prev[from] : prev[f])?.threads ?? [];
+    const after = snapshot[f]?.threads ?? [];
+    events.push(...diffDoc(f, before, after, opts.now));
+  }
+  return { events: events.filter((e) => !excluded(e, exclude)), snapshot, missing };
+}
+function replayEvents(snapshot, opts = {}) {
+  const exclude = new Set((opts.exclude ?? []).map((a) => a.toLowerCase()));
+  const out = [];
+  for (const f of Object.keys(snapshot).sort()) {
+    for (const t of snapshot[f].threads) {
+      if (t.resolved) continue;
+      const last = t.messages.at(-1);
+      const e = { ev: "thread_open", file: f, thread: t.id, author: last?.author ?? "", msg: last?.body ?? "" };
+      if (excluded(e, exclude)) continue;
+      out.push(e);
+      if (t.lost) out.push({ ev: "anchor_lost", file: f, thread: t.id, author: "", msg: last?.body ?? "" });
+    }
+  }
+  return out;
+}
+function snapshotCounts(snapshot) {
+  let threads = 0;
+  let open = 0;
+  let lost = 0;
+  for (const d of Object.values(snapshot)) {
+    threads += d.threads.length;
+    for (const t of d.threads) {
+      if (t.resolved) continue;
+      open++;
+      if (t.lost) lost++;
+    }
+  }
+  return { files: Object.keys(snapshot).length, threads, open, lost };
+}
+var WATCH_MSG_MAX = 200;
+function logValue(v, max = Infinity) {
+  let s = String(v ?? "").replace(/\s+/g, " ").trim();
+  if (s.length > max) s = `${s.slice(0, max - 1)}\u2026`;
+  return s !== "" && !/[\s"=\\]/.test(s) ? s : `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+function formatLogLine(ts, pid, ev, fields = {}) {
+  const parts = [ts, `pid=${pid}`, `ev=${ev}`];
+  for (const [k, v] of Object.entries(fields)) {
+    if (k === "msg" || v === void 0) continue;
+    parts.push(`${k}=${logValue(v)}`);
+  }
+  if ("msg" in fields && fields.msg !== void 0) parts.push(`msg=${logValue(fields.msg, WATCH_MSG_MAX)}`);
+  return parts.join(" ");
+}
+function formatEvent(e, ts, pid) {
+  const { ev, ...rest } = e;
+  return formatLogLine(ts, pid, ev, rest);
+}
+
 // scripts/reviews.mjs
 function sha256Short(text) {
   return createHash("sha256").update(text).digest("hex").slice(0, 12);
@@ -7729,8 +7894,22 @@ function fail(code, msg) {
   console.error(`reviews: ${msg}`);
   process.exit(code);
 }
-var VALUE_FLAGS = /* @__PURE__ */ new Set(["text", "vault", "author", "waiting", "since", "quote", "node", "from", "to"]);
-var BOOL_FLAGS = /* @__PURE__ */ new Set(["open", "unresolved", "json", "dry-run", "help", "resolve", "reopen"]);
+var VALUE_FLAGS = /* @__PURE__ */ new Set([
+  "text",
+  "vault",
+  "author",
+  "waiting",
+  "since",
+  "quote",
+  "node",
+  "from",
+  "to",
+  "interval",
+  "heartbeat",
+  "state"
+]);
+var LIST_FLAGS = /* @__PURE__ */ new Set(["exclude-author"]);
+var BOOL_FLAGS = /* @__PURE__ */ new Set(["open", "unresolved", "json", "dry-run", "help", "resolve", "reopen", "replay", "once"]);
 function parseArgs(argv) {
   const flags = {};
   const pos = [];
@@ -7742,6 +7921,10 @@ function parseArgs(argv) {
       if (VALUE_FLAGS.has(name)) {
         if (argv[i + 1] === void 0) fail(2, `--${name} needs a value`);
         flags[name] = argv[++i];
+      } else if (LIST_FLAGS.has(name)) {
+        if (argv[i + 1] === void 0) fail(2, `--${name} needs a value`);
+        const vals = argv[++i].split(",").map((v) => v.trim()).filter(Boolean);
+        flags[name] = [...flags[name] ?? [], ...vals];
       } else if (BOOL_FLAGS.has(name)) flags[name] = true;
       else fail(2, `unknown flag --${name} (see: reviews help)`);
     } else pos.push(a);
@@ -7929,6 +8112,76 @@ Example:
       process.stdout.write(lines.join("\n") + "\n");
     }
   },
+  watch: {
+    usage: "reviews watch [folder] [--exclude-author <name>]... [--replay] [--interval <s>] [--heartbeat <s>] [--json] [--once --state <file>]",
+    summary: "Print a line as each new comment, reply or resolve arrives",
+    help: `Keeps running and prints one line per change to the threads under the folder
+(default: here), so an agent under a long-running monitor wakes when someone
+comments. Read-only: it never writes a comments file.
+
+On start it prints one "watching" line with the counts; it does not replay what's
+already there unless --replay. Then one line per event:
+
+  thread_new       a thread was started            (author, first message)
+  message_new      a new message on a thread       (author, the message)
+  message_edited   a message's text changed
+  thread_resolved  a thread was resolved           (author when a message just came with it)
+  thread_reopened  a resolved thread was opened again
+  anchor_lost      an open thread's passage, box or arrow is gone from the doc
+  thread_removed   a thread, or its whole comments file, was deleted
+  file_renamed     a doc and its comments moved   (from = the old path)
+  thread_open      --replay only: a thread already open when the watch started
+
+Each line: <UTC time> pid=<n> ev=<event> file=<path in the vault> thread=<id>
+author=<name> msg="<text, one line, cut at 200 characters>". Housekeeping lines use
+the same shape: watching, heartbeat, parse_retry (a comments file caught mid-write \u2014
+read again next pass, never reported as removed), watch_fallback, scan_error,
+stopped.
+
+  --exclude-author <name>  drop events by this author \u2014 your own replies (repeat,
+                           or comma-separate, for several)
+  --replay                 first emit every open thread (thread_open), so nothing
+                           left before the watch started is missed
+  --interval <s>           poll every <s> seconds as well as listening for file
+                           changes (default 5; the listener misses synced and renamed
+                           files on macOS, the poll doesn't)
+  --heartbeat <s>          a heartbeat line every <s> seconds (default 60; 0 = none)
+  --json                   one JSON object per line instead (msg not cut)
+  --once --state <file>    no long-running process: compare against the state file,
+                           print what changed since, save the new state, exit. The
+                           first run only records (and prints the watching line).
+
+Stops cleanly on Ctrl-C / SIGTERM. Exit 2 on bad usage.
+
+Examples:
+  reviews watch docs --exclude-author claude
+  reviews watch docs --exclude-author claude --replay --heartbeat 0
+  reviews watch docs --once --state .reviews-watch.json   # from cron or a loop`,
+    run({ flags, pos }) {
+      const target = pos[0] ?? ".";
+      if (!existsSync(target) || !statSync(target).isDirectory()) fail(2, `watch wants a folder (got "${target}")`);
+      const num = (name, dflt, min) => {
+        if (flags[name] === void 0) return dflt;
+        const n = Number(flags[name]);
+        if (!Number.isFinite(n) || n < min) fail(2, `--${name} wants a number of seconds${min > 0 ? " above 0" : ""} (got "${flags[name]}")`);
+        return n;
+      };
+      const opts = {
+        exclude: flags["exclude-author"] ?? [],
+        interval: num("interval", 5, 0.05),
+        heartbeat: num("heartbeat", 60, 0),
+        json: !!flags.json,
+        replay: !!flags.replay
+      };
+      if (opts.interval <= 0) fail(2, "--interval must be above 0");
+      if (flags.once) {
+        if (!flags.state) fail(2, "--once needs --state <file> to remember what it saw last time");
+        return watchOnce(target, flags.state, opts);
+      }
+      if (flags.state) fail(2, "--state goes with --once");
+      watchLive(target, opts);
+    }
+  },
   open: {
     usage: "reviews open <doc.md> [thread-id] [--vault <name>] [--dry-run]",
     summary: "Open a doc in Obsidian, focused on a thread",
@@ -8077,6 +8330,188 @@ function setResolved(doc, id, resolved, vault, flags) {
   process.stdout.write(`${id} ${resolved ? "resolved" : "reopened"}
 `);
 }
+function makeScanner(target) {
+  const root = vaultRootOf(target) ?? resolve(target);
+  const cache = /* @__PURE__ */ new Map();
+  const stampOf = (p) => {
+    try {
+      const st = statSync(p);
+      return `${st.size}:${st.mtimeMs}`;
+    } catch {
+      return "-";
+    }
+  };
+  return () => {
+    const snapshot = {};
+    const unreadable = [];
+    for (const file of reviewedDocsUnder(target)) {
+      const key = relative(root, resolve(file));
+      const side = sidecarPathFor(file);
+      const stamp = `${stampOf(side)}|${stampOf(file)}`;
+      const hit = cache.get(key);
+      if (hit?.stamp === stamp) {
+        snapshot[key] = hit.doc;
+        continue;
+      }
+      let raw;
+      try {
+        raw = readFileSync(side, "utf8");
+      } catch (err) {
+        if (err.code === "ENOENT") continue;
+        unreadable.push({ key, stamp, why: err.code ?? err.message });
+        continue;
+      }
+      const doc = parseSidecar(raw, import_yaml.parse);
+      if (!doc) {
+        unreadable.push({ key, stamp, why: raw.length ? "not valid review frontmatter yet" : "empty" });
+        continue;
+      }
+      let text = null;
+      try {
+        text = readFileSync(file, "utf8");
+      } catch {
+      }
+      for (const t of doc.threads) if (!t.resolved && text != null && anchorContentIn(text, t.anchor) === null) t.lost = true;
+      cache.set(key, { stamp, doc });
+      snapshot[key] = doc;
+    }
+    for (const key of cache.keys()) if (!(key in snapshot)) cache.delete(key);
+    return { root, snapshot, unreadable };
+  };
+}
+function makeEmitter(json) {
+  const pid = process.pid;
+  process.stdout.on("error", (err) => {
+    if (err.code === "EPIPE") process.exit(0);
+    throw err;
+  });
+  const out = (line) => process.stdout.write(line + "\n");
+  return {
+    event(e) {
+      const ts = (/* @__PURE__ */ new Date()).toISOString();
+      out(json ? JSON.stringify({ ts, pid, ...e }) : formatEvent(e, ts, pid));
+    },
+    log(ev, fields = {}) {
+      const ts = (/* @__PURE__ */ new Date()).toISOString();
+      out(json ? JSON.stringify({ ts, pid, ev, ...fields }) : formatLogLine(ts, pid, ev, fields));
+    }
+  };
+}
+function makeRetryLogger(emit) {
+  const told = /* @__PURE__ */ new Map();
+  return (unreadable) => {
+    for (const u of unreadable) {
+      if (told.get(u.key) === u.stamp) continue;
+      told.set(u.key, u.stamp);
+      emit.log("parse_retry", { file: u.key, msg: u.why });
+    }
+    const now = new Set(unreadable.map((u) => u.key));
+    for (const key of told.keys()) if (!now.has(key)) told.delete(key);
+  };
+}
+function watchLive(target, opts) {
+  const emit = makeEmitter(opts.json);
+  const scan = makeScanner(target);
+  const reportRetries = makeRetryLogger(emit);
+  const exclude = opts.exclude.length ? opts.exclude.join(",") : void 0;
+  const first = scan();
+  let state = diffSnapshots({}, first.snapshot, { unreadable: first.unreadable.map((u) => u.key) });
+  let snapshot = state.snapshot;
+  let missing = [];
+  let watcher = null;
+  let debounce = null;
+  const passSoon = () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(pass, 250);
+  };
+  try {
+    watcher = fsWatch(target, { recursive: true }, (_type, name) => {
+      if (!name || /\.md$/.test(String(name))) passSoon();
+    });
+    watcher.on("error", (err) => {
+      emit.log("watch_fallback", { msg: `file listener failed, polling only: ${err.message}` });
+      watcher?.close();
+      watcher = null;
+    });
+  } catch (err) {
+    emit.log("watch_fallback", { msg: `no file listener here, polling only: ${err.message}` });
+  }
+  const counts = snapshotCounts(snapshot);
+  emit.log("watching", {
+    root: first.root,
+    folder: target,
+    ...counts,
+    interval: opts.interval,
+    heartbeat: opts.heartbeat,
+    fswatch: watcher ? "on" : "off",
+    exclude,
+    replay: opts.replay ? "on" : void 0
+  });
+  reportRetries(first.unreadable);
+  if (opts.replay) for (const e of replayEvents(snapshot, { exclude: opts.exclude })) emit.event(e);
+  function pass() {
+    let read;
+    try {
+      read = scan();
+    } catch (err) {
+      emit.log("scan_error", { msg: err.message });
+      return;
+    }
+    reportRetries(read.unreadable);
+    const d = diffSnapshots(snapshot, read.snapshot, {
+      exclude: opts.exclude,
+      unreadable: read.unreadable.map((u) => u.key),
+      missing,
+      now: Date.now()
+    });
+    snapshot = d.snapshot;
+    missing = d.missing;
+    for (const e of d.events) emit.event(e);
+  }
+  const poll = setInterval(pass, opts.interval * 1e3);
+  const beat = opts.heartbeat > 0 ? setInterval(() => emit.log("heartbeat", snapshotCounts(snapshot)), opts.heartbeat * 1e3) : null;
+  const stop = (signal) => {
+    clearInterval(poll);
+    if (beat) clearInterval(beat);
+    clearTimeout(debounce);
+    watcher?.close();
+    emit.log("stopped", { signal });
+    process.exitCode = 0;
+  };
+  process.once("SIGINT", () => stop("SIGINT"));
+  process.once("SIGTERM", () => stop("SIGTERM"));
+}
+function watchOnce(target, statePath, opts) {
+  const emit = makeEmitter(opts.json);
+  const read = makeScanner(target)();
+  let saved = null;
+  if (existsSync(statePath)) {
+    try {
+      saved = JSON.parse(readFileSync(statePath, "utf8"));
+    } catch (err) {
+      fail(2, `can't read the state file ${statePath} (${err.message}) \u2014 delete it to start over`);
+    }
+  }
+  const unreadable = read.unreadable.map((u) => u.key);
+  for (const u of read.unreadable) emit.log("parse_retry", { file: u.key, msg: u.why });
+  let next;
+  if (!saved) {
+    next = diffSnapshots({}, read.snapshot, { unreadable });
+    emit.log("watching", { root: read.root, folder: target, ...snapshotCounts(next.snapshot), state: statePath, first: "yes" });
+    if (opts.replay) for (const e of replayEvents(next.snapshot, { exclude: opts.exclude })) emit.event(e);
+  } else {
+    next = diffSnapshots(saved.snapshot ?? {}, read.snapshot, {
+      exclude: opts.exclude,
+      unreadable,
+      missing: saved.missing ?? [],
+      now: Date.now()
+    });
+    for (const e of next.events) emit.event(e);
+  }
+  const tmp = `${statePath}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify({ root: read.root, at: (/* @__PURE__ */ new Date()).toISOString(), snapshot: next.snapshot, missing: next.missing }) + "\n");
+  renameSync(tmp, statePath);
+}
 function vaultPath(doc) {
   const root = vaultRootOf(doc);
   return root ? relative(root, resolve(doc)) : doc;
@@ -8095,7 +8530,7 @@ function overview() {
     ...Object.entries(COMMANDS).map(([k, c]) => `  ${k.padEnd(width)}  ${c.summary}`),
     "",
     "Run `reviews help <command>` (or `reviews <command> --help`) for details.",
-    "Reading commands never write; open and reply go through Obsidian.",
+    "Reading commands (watch too) never write; open and reply go through Obsidian.",
     ""
   ].join("\n");
 }

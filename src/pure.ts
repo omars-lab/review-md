@@ -304,7 +304,10 @@ export function anchorContentIn(text: string, anchor: Record<string, unknown>): 
       const body = stripFrontmatter(text);
       if (a.blockId) {
         const block = blockTextFor(body, a.blockId);
-        return block == null ? null : norm(block);
+        if (block != null) return norm(block);
+        // The ^id was lost (e.g. a build script rewrote the page) — fall back to the
+        // quote, as the highlight does, so the CLI and the UI agree on "still there".
+        if (!a.quote) return null;
       }
       if (a.quote) return norm(body).includes(norm(a.quote)) ? norm(a.quote) : null;
       return undefined; // no durable anchor to check

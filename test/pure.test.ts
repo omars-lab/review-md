@@ -559,6 +559,14 @@ test("anchorContentIn: a passage's own text, so edits elsewhere leave it alone",
   assert.equal(anchorContentIn(edited, { type: "text", blockId: "p2" }), anchorContentIn(doc, { type: "text", blockId: "p2" }));
 });
 
+test("anchorContentIn: a lost block id falls back to the quote, like the highlight does", () => {
+  // A build script rewrote the page and dropped ^4juaxl, but the quoted heading is still there.
+  const doc = "# Page\n\nIntro.\n\n## Related\n\n- [[Other]]\n";
+  assert.equal(anchorContentIn(doc, { type: "text", blockId: "4juaxl", quote: "## Related" }), "## Related");
+  assert.equal(anchorContentIn(doc, { type: "text", blockId: "4juaxl", quote: "## Gone" }), null);
+  assert.equal(anchorContentIn(doc, { type: "text", blockId: "4juaxl" }), null);
+});
+
 test("anchorContentIn: diagram boxes and arrows read from mermaid fences only", () => {
   const doc = "A is prose.\n\n```mermaid\nflowchart LR\n  A[Start] --> B\n```\n";
   assert.equal(anchorContentIn(doc, { type: "mermaidNode", node: "A" }), "A[Start]");

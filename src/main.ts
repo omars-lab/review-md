@@ -24,6 +24,7 @@ import {
   stripBlockIds,
   removeBlockIdFromText,
   blockTextFor,
+  blockIdTargetLine,
   sha256Short,
   bodyHash,
   ordinalsFromLog,
@@ -1205,14 +1206,9 @@ export default class ReviewMdPlugin extends Plugin {
     if (typeof line !== "number" || !Number.isFinite(line)) return null;
     const text = await this.app.vault.read(file);
     const lines = text.split("\n");
-    if (line < 0 || line >= lines.length) return null;
-    // Extend from the section start to the block's last non-blank line (a block is
-    // a run of consecutive non-blank lines), and don't reach into a fenced block.
-    let idx = line;
-    while (idx + 1 < lines.length && lines[idx + 1].trim() !== "" && !/^\s*`{3,}/.test(lines[idx + 1])) {
-      idx++;
-    }
-    while (idx > line && lines[idx].trim() === "") idx--;
+    // The block's last line, skipping past a frontmatter block (see blockIdTargetLine).
+    const idx = blockIdTargetLine(lines, line);
+    if (idx === null) return null;
     const target = lines[idx];
     const existing = target.match(/\s\^([A-Za-z0-9_-]+)\s*$/) ?? target.match(/^\^([A-Za-z0-9_-]+)\s*$/);
     if (existing) return existing[1];

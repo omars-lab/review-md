@@ -96,6 +96,34 @@ export function blockIdTargetLine(lines: string[], line: number): number | null 
   return idx;
 }
 
+const STANDALONE_ID = /^\^[A-Za-z0-9_-]+[ \t]*$/;
+const TRAILING_ID = /\s\^([A-Za-z0-9_-]+)\s*$/;
+const isTableRow = (l: string) => /^\s*\|/.test(l);
+
+/**
+ * Put a block id on the block ending at `lastLine`, or return the id it already
+ * has. Returns `{ lines, id }`; `lines` is unchanged when the id already existed.
+ * A paragraph or heading gets ` ^id` at the end of its last line. A table gets
+ * `^id` on its own line after the table, with a blank line before it: on the
+ * last row the marker is read as one more cell and the table stops drawing.
+ */
+export function placeBlockId(lines: string[], lastLine: number, mintId: string): { lines: string[]; id: string } {
+  const target = lines[lastLine];
+  if (isTableRow(target)) {
+    const after = lines.slice(lastLine + 1, lastLine + 3).map((l) => l.trim());
+    const own = after.find((l) => STANDALONE_ID.test(l));
+    if (after[0] === "" && own) return { lines, id: own.slice(1).trim() };
+    const out = lines.slice();
+    out.splice(lastLine + 1, 0, "", `^${mintId}`);
+    return { lines: out, id: mintId };
+  }
+  const existing = target.match(TRAILING_ID) ?? target.match(/^\^([A-Za-z0-9_-]+)\s*$/);
+  if (existing) return { lines, id: existing[1] };
+  const out = lines.slice();
+  out[lastLine] = `${target.replace(/\s+$/, "")} ^${mintId}`;
+  return { lines: out, id: mintId };
+}
+
 /**
  * The text of the block bearing `^blockId`, with the id marker stripped, or null
  * if the id isn't present in `text`. A "block" is the run of consecutive non-blank
@@ -107,9 +135,14 @@ export function blockTextFor(text: string, blockId: string): string | null {
   const esc = blockId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const idRe = new RegExp(`(^|\\s)\\^${esc}[ \\t]*$`);
   const lines = text.split(/\r?\n/);
-  const idx = lines.findIndex((l) => idRe.test(l));
+  let idx = lines.findIndex((l) => idRe.test(l));
   if (idx < 0) return null;
   const fence = (l: string) => /^[ \t]*`{3,}/.test(l);
+  // A table's id sits on its own line after the table (see placeBlockId): the
+  // block it names is the table above it, across one blank line.
+  if (STANDALONE_ID.test(lines[idx]) && idx >= 2 && lines[idx - 1].trim() === "" && isTableRow(lines[idx - 2])) {
+    idx -= 2;
+  }
   let start = idx;
   let end = idx;
   while (start > 0 && lines[start - 1].trim() !== "" && !fence(lines[start - 1])) start--;

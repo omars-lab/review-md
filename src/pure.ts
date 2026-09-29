@@ -57,6 +57,46 @@ export function removeBlockIdFromText(text: string, blockId: string): string {
 }
 
 /**
+ * The 0-based index of a leading YAML frontmatter block's closing `---`, or null
+ * when the lines don't open with one. Same shape as `stripFrontmatter`: `---` on
+ * the first line, a closing `---` later (an empty block counts), and no closing
+ * fence means no frontmatter.
+ */
+export function frontmatterEndLine(lines: string[]): number | null {
+  if (lines.length === 0 || !/^---\r?$/.test(lines[0])) return null;
+  for (let i = 1; i < lines.length; i++) {
+    if (/^---[ \t]*\r?$/.test(lines[i])) return i;
+  }
+  return null;
+}
+
+/**
+ * The 0-based line that should carry a text anchor's `^blockId`, given the
+ * section's start line (from getSectionInfo). A block is a run of consecutive
+ * non-blank lines, so the id goes on the block's last line, never reaching into
+ * a fenced block. A section at or inside the frontmatter (a comment on the
+ * Properties view starts at line 0) is moved to the first block after it: an id
+ * on the closing `---` breaks the YAML, and Obsidian then shows no properties.
+ * Null when the line is out of range or nothing follows the frontmatter.
+ */
+export function blockIdTargetLine(lines: string[], line: number): number | null {
+  if (!Number.isInteger(line) || line < 0 || line >= lines.length) return null;
+  let start = line;
+  const fmEnd = frontmatterEndLine(lines);
+  if (fmEnd !== null && start <= fmEnd) {
+    start = fmEnd + 1;
+    while (start < lines.length && lines[start].trim() === "") start++;
+    if (start >= lines.length) return null;
+  }
+  let idx = start;
+  while (idx + 1 < lines.length && lines[idx + 1].trim() !== "" && !/^\s*`{3,}/.test(lines[idx + 1])) {
+    idx++;
+  }
+  while (idx > start && lines[idx].trim() === "") idx--;
+  return idx;
+}
+
+/**
  * The text of the block bearing `^blockId`, with the id marker stripped, or null
  * if the id isn't present in `text`. A "block" is the run of consecutive non-blank
  * lines around the id line (stopping at a blank line or a code fence) — the same

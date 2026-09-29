@@ -24,6 +24,7 @@ import {
   stripBlockIds,
   removeBlockIdFromText,
   blockTextFor,
+  blockIdTargetLine,
   sha256Short,
   bodyHash,
   anchorContentIn,
@@ -90,6 +91,38 @@ test("stripBlockIds drops trailing and standalone block-id markers", () => {
 test("removeBlockIdFromText removes only the named id", () => {
   assert.equal(removeBlockIdFromText("line one ^keep\nline two ^drop", "drop"), "line one ^keep\nline two");
   assert.equal(removeBlockIdFromText("^solo\nnext", "solo"), "next");
+});
+
+test("blockIdTargetLine never puts an id on the frontmatter (a Properties comment starts at line 0)", () => {
+  // The bug: the section started at line 0, the walk ran down the non-blank
+  // frontmatter lines, and the id landed on the closing `---`, breaking the YAML.
+  const lines = "---\nid: x\ntags:\n  - a\n---\n\n# Title\n\nprose\n".split("\n");
+  assert.equal(blockIdTargetLine(lines, 0), 6); // the H1, the first block after it
+  assert.equal(blockIdTargetLine(lines, 2), 6); // a line inside the block moves too
+  assert.equal(blockIdTargetLine(lines, 4), 6); // and the closing fence itself
+  // CRLF and an empty block are frontmatter too.
+  assert.equal(blockIdTargetLine("---\r\na: 1\r\n---\r\n# T\r\n".split("\n"), 0), 3);
+  assert.equal(blockIdTargetLine("---\n---\npara\n".split("\n"), 0), 2);
+});
+
+test("blockIdTargetLine is null when nothing follows the frontmatter", () => {
+  assert.equal(blockIdTargetLine("---\na: 1\n---\n".split("\n"), 0), null);
+  assert.equal(blockIdTargetLine("---\na: 1\n---".split("\n"), 0), null);
+});
+
+test("blockIdTargetLine keeps the old walk for a section in the body", () => {
+  const lines = "---\na: 1\n---\n\nfirst\nstill first\n\n---\n\nafter the rule\n".split("\n");
+  assert.equal(blockIdTargetLine(lines, 4), 5); // the block's last line
+  assert.equal(blockIdTargetLine(lines, 7), 7); // a mid-document rule is not frontmatter
+  // No frontmatter at all: line 0 is an ordinary block.
+  assert.equal(blockIdTargetLine("para one\npara two\n\nnext\n".split("\n"), 0), 1);
+  // A `---` first line with no closing fence is not frontmatter either.
+  assert.equal(blockIdTargetLine("---\nnot yaml\n".split("\n"), 0), 1);
+  // The walk stops before a code fence.
+  assert.equal(blockIdTargetLine("text\n```\ncode\n```\n".split("\n"), 0), 0);
+  // Out of range.
+  assert.equal(blockIdTargetLine(["a"], 5), null);
+  assert.equal(blockIdTargetLine(["a"], -1), null);
 });
 
 test("blockTextFor extracts the block around an id, marker stripped", () => {

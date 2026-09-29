@@ -34,7 +34,7 @@ repos:
         entry: node scripts/build-cli.mjs --check
         language: system
         pass_filenames: false
-        files: '^(scripts/(reviews|build-cli)\.mjs|src/pure\.ts|plugins/review-md/bin/)'
+        files: '^(scripts/(reviews|build-cli)\.mjs|src/(pure|watch)\.ts|plugins/review-md/bin/)'
 
       # Schema-check any comment sidecar being committed: required fields, known
       # anchor types, and — the common trap — hash fields YAML would parse as

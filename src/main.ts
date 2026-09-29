@@ -40,6 +40,7 @@ import {
   filterThreads,
   threadsDigest,
   commentedLines,
+  placeBlockId,
   type DigestFile,
   type ExportFilter,
 } from "./pure";
@@ -1209,12 +1210,9 @@ export default class ReviewMdPlugin extends Plugin {
     // The block's last line, skipping past a frontmatter block (see blockIdTargetLine).
     const idx = blockIdTargetLine(lines, line);
     if (idx === null) return null;
-    const target = lines[idx];
-    const existing = target.match(/\s\^([A-Za-z0-9_-]+)\s*$/) ?? target.match(/^\^([A-Za-z0-9_-]+)\s*$/);
-    if (existing) return existing[1];
-    lines[idx] = `${target.replace(/\s+$/, "")} ^${mintId}`;
-    await this.app.vault.modify(file, lines.join("\n"));
-    return mintId;
+    const placed = placeBlockId(lines, idx, mintId);
+    if (placed.lines !== lines) await this.app.vault.modify(file, placed.lines.join("\n"));
+    return placed.id;
   }
 
   /**

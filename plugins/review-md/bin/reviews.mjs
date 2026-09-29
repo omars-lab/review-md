@@ -7385,13 +7385,18 @@ function removeBlockIdFromText(text, blockId) {
   const esc = blockId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return text.replace(new RegExp(`[ \\t]+\\^${esc}(?=[ \\t]*$)`, "gm"), "").replace(new RegExp(`^\\^${esc}[ \\t]*\\r?\\n?`, "gm"), "");
 }
+var STANDALONE_ID = /^\^[A-Za-z0-9_-]+[ \t]*$/;
+var isTableRow = (l) => /^\s*\|/.test(l);
 function blockTextFor(text, blockId) {
   const esc = blockId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const idRe = new RegExp(`(^|\\s)\\^${esc}[ \\t]*$`);
   const lines = text.split(/\r?\n/);
-  const idx = lines.findIndex((l) => idRe.test(l));
+  let idx = lines.findIndex((l) => idRe.test(l));
   if (idx < 0) return null;
   const fence = (l) => /^[ \t]*`{3,}/.test(l);
+  if (STANDALONE_ID.test(lines[idx]) && idx >= 2 && lines[idx - 1].trim() === "" && isTableRow(lines[idx - 2])) {
+    idx -= 2;
+  }
   let start = idx;
   let end = idx;
   while (start > 0 && lines[start - 1].trim() !== "" && !fence(lines[start - 1])) start--;

@@ -25,6 +25,7 @@ import {
   removeBlockIdFromText,
   blockTextFor,
   blockIdTargetLine,
+  placeBlockId,
   sha256Short,
   bodyHash,
   anchorContentIn,
@@ -651,4 +652,23 @@ test("digestResultParams: the digest rides along, cut and flagged when too long"
   const big = digestResultParams("x".repeat(DIGEST_URL_MAX + 5), 9);
   assert.equal(big.digest.length, DIGEST_URL_MAX);
   assert.equal(big.truncated, "true");
+});
+
+test("placeBlockId puts a table's id on its own line after the table, never in a row", () => {
+  const lines = ["| | |", "|---|---|", "| a | b |", "", "Next."];
+  const placed = placeBlockId(lines, 2, "tab1");
+  assert.equal(placed.id, "tab1");
+  assert.deepEqual(placed.lines, ["| | |", "|---|---|", "| a | b |", "", "^tab1", "", "Next."]);
+  // A second comment on the same table reuses the id and leaves the file alone.
+  const again = placeBlockId(placed.lines, 2, "tab2");
+  assert.equal(again.id, "tab1");
+  assert.equal(again.lines, placed.lines);
+  // And the table is still the block that id names.
+  assert.equal(blockTextFor(placed.lines.join("\n"), "tab1"), "| | |\n|---|---|\n| a | b |");
+});
+
+test("placeBlockId appends to a paragraph's last line, or reuses its id", () => {
+  assert.deepEqual(placeBlockId(["one", "two"], 1, "p1").lines, ["one", "two ^p1"]);
+  const kept = placeBlockId(["one ^old"], 0, "p2");
+  assert.equal(kept.id, "old");
 });

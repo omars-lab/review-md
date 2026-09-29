@@ -92,6 +92,7 @@ npm run reviews -- find "frontmatter" docs               # threads mentioning so
 npm run reviews -- show path/to/design.md d1a2b3         # one thread in full
 npm run reviews -- reply path/to/design.md d1a2b3 "Done in abc123." --author claude
 npm run reviews -- open path/to/design.md d1a2b3         # jump to it in Obsidian
+npm run reviews -- open d1a2b3 docs                      # same, finding the doc by thread id
 npm run reviews -- watch docs --exclude-author claude   # one line per new comment/reply/resolve, as they arrive
 ```
 
@@ -101,6 +102,8 @@ AI" command and `obsidian://review-md-export`. `--json` on one doc emits
 `{ root, files: [ { file, vaultPath, uid, threads } ] }` (`file` is the path on disk, ready to pass back to `show`/`reply`) — the stable programmatic surface
 for the agent. `reply`/`open` find the vault as the nearest folder above the doc
 holding `.obsidian/` (or pass `--vault`); `--dry-run` prints the URL instead.
+`open` given only a thread id searches the folder (default `.`) for the one doc
+holding it, and exits `2` naming the docs when the id is on more than one.
 Exit codes: `0` OK (even with zero threads), `2` usage error, `3` no sidecar or
 no such thread, `4` Obsidian didn't take it (`reply` waits up to 10s for the message to appear in the sidecar and fails with `4` if it never does).
 

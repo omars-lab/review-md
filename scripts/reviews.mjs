@@ -470,16 +470,21 @@ Examples:
   },
 
   open: {
-    usage: "reviews open <doc.md> [thread-id] [--vault <name>] [--dry-run]",
+    usage: "reviews open (<doc.md> [thread-id] | <thread-id> [folder]) [--vault <name>] [--dry-run]",
     summary: "Open a doc in Obsidian, focused on a thread",
     help: `Sends obsidian://review-md-open to Obsidian. The path is taken relative to the
 vault (the nearest folder with .obsidian/ above it). --dry-run prints the URL instead.
 
-Example:
-  reviews open docs/designs/design.md d1a2b3`,
+Given a thread id alone, finds the doc that holds it under the folder (default:
+the current folder), so an id copied from \`reviews list\` is enough.
+
+Examples:
+  reviews open docs/designs/design.md d1a2b3
+  reviews open d1a2b3 docs`,
     run({ flags, pos }) {
-      const [doc, thread] = pos;
-      if (!doc) fail(2, `usage: ${this.usage}`);
+      const [first, second] = pos;
+      if (!first) fail(2, `usage: ${this.usage}`);
+      const [doc, thread] = existsSync(first) ? [first, second] : [docHolding(first, second ?? "."), first];
       openUrl(url("review-md-open", { vault: vaultName(doc, flags), file: vaultPath(doc), ...(thread ? { thread } : {}) }), flags);
     },
   },
@@ -834,6 +839,18 @@ function watchOnce(target, statePath, opts) {
   const tmp = `${statePath}.tmp-${process.pid}`;
   writeFileSync(tmp, JSON.stringify({ root: read.root, at: new Date().toISOString(), snapshot: next.snapshot, missing: next.missing }) + "\n");
   renameSync(tmp, statePath);
+}
+
+/** The on-disk path of the one doc under `folder` holding thread `id`. Resolved
+ *  threads count, since opening one to read it is fine. */
+function docHolding(id, folder) {
+  if (!existsSync(folder) || !statSync(folder).isDirectory()) fail(2, `${folder} is not a folder`);
+  const docs = load(folder, { includeResolved: true })
+    .filter((f) => f.threads.some((t) => t.id === id))
+    .map((f) => f.file);
+  if (docs.length === 0) fail(3, `no doc or thread ${id} under ${folder} (try: reviews list ${folder})`);
+  if (docs.length > 1) fail(2, `thread ${id} is on more than one doc — name the doc: ${docs.join(", ")}`);
+  return docs[0];
 }
 
 /** A doc's path inside its vault, for obsidian:// URLs. */

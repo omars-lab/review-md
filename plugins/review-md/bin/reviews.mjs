@@ -7506,7 +7506,8 @@ function anchorContentIn(text, anchor) {
       const body = stripFrontmatter(text);
       if (a.blockId) {
         const block = blockTextFor(body, a.blockId);
-        return block == null ? null : norm(block);
+        if (block != null) return norm(block);
+        if (!a.quote) return null;
       }
       if (a.quote) return norm(body).includes(norm(a.quote)) ? norm(a.quote) : null;
       return void 0;

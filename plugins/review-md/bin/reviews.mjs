@@ -7938,13 +7938,13 @@ function vaultName(target, flags) {
   if (!root) fail(2, `can't tell which vault ${target} is in (no .obsidian/ above it) \u2014 pass --vault <name>`);
   return basename(root);
 }
-function openUrl(url2, flags) {
+function openUrl(url2, flags, { focus = false } = {}) {
   if (flags["dry-run"]) {
     process.stdout.write(url2 + "\n");
     return;
   }
   try {
-    execFileSync("open", [url2], { stdio: "inherit", timeout: 1e4 });
+    execFileSync("open", focus ? [url2] : ["-g", url2], { stdio: "inherit", timeout: 1e4 });
     process.stdout.write(`sent to Obsidian: ${url2}
 `);
   } catch (err) {
@@ -8194,7 +8194,7 @@ Example:
     run({ flags, pos }) {
       const [doc, thread] = pos;
       if (!doc) fail(2, `usage: ${this.usage}`);
-      openUrl(url("review-md-open", { vault: vaultName(doc, flags), file: vaultPath(doc), ...thread ? { thread } : {} }), flags);
+      openUrl(url("review-md-open", { vault: vaultName(doc, flags), file: vaultPath(doc), ...thread ? { thread } : {} }), flags, { focus: true });
     }
   },
   reply: {

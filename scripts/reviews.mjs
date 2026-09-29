@@ -202,14 +202,19 @@ function vaultName(target, flags) {
   return basename(root);
 }
 
-/** Hand a URL to Obsidian (macOS `open`), or just print it with --dry-run. */
-function openUrl(url, flags) {
+/**
+ * Hand a URL to Obsidian (macOS `open`), or just print it with --dry-run.
+ * Writes (comment, reply, resolve) open it in the background (`open -g`): an agent posting
+ * replies must not pull Obsidian over whatever the person is doing. Only `reviews open`, whose
+ * point is to show the thread, brings Obsidian to the front.
+ */
+function openUrl(url, flags, { focus = false } = {}) {
   if (flags["dry-run"]) {
     process.stdout.write(url + "\n");
     return;
   }
   try {
-    execFileSync("open", [url], { stdio: "inherit", timeout: 10_000 });
+    execFileSync("open", focus ? [url] : ["-g", url], { stdio: "inherit", timeout: 10_000 });
     process.stdout.write(`sent to Obsidian: ${url}\n`);
   } catch (err) {
     fail(4, `couldn't open the URL (is Obsidian installed?): ${err.message}`);
@@ -485,7 +490,7 @@ Examples:
       const [first, second] = pos;
       if (!first) fail(2, `usage: ${this.usage}`);
       const [doc, thread] = existsSync(first) ? [first, second] : [docHolding(first, second ?? "."), first];
-      openUrl(url("review-md-open", { vault: vaultName(doc, flags), file: vaultPath(doc), ...(thread ? { thread } : {}) }), flags);
+      openUrl(url("review-md-open", { vault: vaultName(doc, flags), file: vaultPath(doc), ...(thread ? { thread } : {}) }), flags, { focus: true });
     },
   },
 

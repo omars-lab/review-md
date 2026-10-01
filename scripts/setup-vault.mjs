@@ -125,6 +125,19 @@ function evalJs(vault, code) {
   return body === "undefined" ? undefined : JSON.parse(body);
 }
 
+/** The live app answers `vault=<name>` with the first open vault of that name, and
+ *  folder names repeat (three repos each keep a `docs` vault). So before acting on
+ *  "the vault", ask the app which folder it actually answered for. Returns the
+ *  mismatch message, or null when the app is attached to `vault`. */
+function wrongLiveVault(name, vault) {
+  const live = evalJs(name, "app.vault.adapter.basePath");
+  if (resolve(live) === vault) return null;
+  return (
+    `Obsidian answered vault "${name}" with ${live}, not ${vault} — more than one open vault ` +
+    `is named "${name}". Switch Obsidian to ${vault} (or close the other "${name}" vaults), then re-run.`
+  );
+}
+
 function activateObsidian() {
   run("osascript", ["-e", 'tell application "Obsidian" to activate'], OSA_TIMEOUT_MS, "osascript");
 }
@@ -227,6 +240,9 @@ async function cmdCheck(opts) {
   let restricted = "app not reachable";
   let restrictedOk = false;
   try {
+    const wrong = wrongLiveVault(name, vault);
+    row("app attached to vault", !wrong, wrong ?? vault);
+    if (wrong) throw new Error("the app is attached to another vault");
     const on = evalJs(name, "app.plugins.isEnabled()");
     restrictedOk = on === true;
     restricted = on ? "off (community plugins on)" : "ON — community plugins disabled";
@@ -301,14 +317,18 @@ async function cmdInstall(opts) {
   const name = basename(vault);
 
   // The live app must answer before we change anything, so a half-install can't happen.
+  let wrong;
   try {
-    evalJs(name, "app.vault.getName()");
+    wrong = wrongLiveVault(name, vault);
   } catch (e) {
     die(
       `Obsidian isn't answering for vault "${name}": ${e.message.split("\n")[0]}\n` +
         "Open the vault in Obsidian and turn on Settings → General → Command line interface, then re-run.",
     );
   }
+  // Every live step below (enable BRAT, BRAT's add, enable review-md) lands in whatever
+  // vault answered, so a same-named vault would be changed instead of this one.
+  if (wrong) die(wrong);
 
   if (!pluginFacts(vault, BRAT_ID).installed) await installBratFiles(vault);
   else log("brat_present", { version: pluginFacts(vault, BRAT_ID).version });
@@ -399,8 +419,9 @@ function cmdVerify(opts) {
       `({ loaded: !!app.plugins.plugins["${PLUGIN_ID}"], version: app.plugins.manifests["${PLUGIN_ID}"]?.version ?? null, base: app.vault.adapter.basePath })`,
     );
     vaultPath = s.base;
-    assert(s.loaded, "review-md is not loaded");
-    return `v${s.version}`;
+    assert(s.loaded, `review-md is not loaded in ${s.base}`);
+    // The name can match several open vaults; show which one answered.
+    return `v${s.version} in ${s.base}`;
   });
 
   check("commands registered", () => {

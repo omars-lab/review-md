@@ -1,7 +1,7 @@
 {
   "name": "review-md",
   "displayName": "review-md",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Read, search and answer review-md comment threads (the Obsidian plugin's git-tracked sidecars) from Claude Code: a `reviews` CLI on PATH, the same commands as MCP tools, and a skill that runs the find → fix → reply loop.",
   "author": {
     "name": "omars-lab",

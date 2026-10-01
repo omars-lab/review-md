@@ -883,3 +883,14 @@ export function withQueryParams(url: string, params: Record<string, string>): st
   const sep = base.includes("?") ? (base.endsWith("?") || base.endsWith("&") ? "" : "&") : "?";
   return `${base}${sep}${extra}${frag}`;
 }
+
+/** The view state `review-md-open` opens a file with, from its `mode` param.
+ *  Obsidian calls the editor `source` (Live Preview is source with
+ *  `source: false`) and Reading view `preview`. `edit` sets only `mode`, so the
+ *  vault's own Live Preview / Source choice stands. No mode → no state, which
+ *  leaves the vault's "default view for new tabs" in charge. */
+export function openViewState(mode: string | undefined): { state?: { mode: "source" | "preview" } } {
+  if (mode === "edit") return { state: { mode: "source" } };
+  if (mode === "read") return { state: { mode: "preview" } };
+  return {};
+}

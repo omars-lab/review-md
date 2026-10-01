@@ -18,6 +18,7 @@ Open a markdown file in the review-md reviewer and, optionally, scroll to a spec
 | `vault` | yes — URL only | string | — | Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). |
 | `file` | yes | string | — | Vault-relative path to the markdown file to open. |
 | `thread` | no | string | — | Thread id (the file's `^blockId`) to scroll to after opening. |
+| `mode` | no | string | enum: `edit`, `read` | Open in the editor (`edit`: Live Preview or Source, whichever the vault uses) or in Reading view (`read`). Omit to use the vault's default view for new tabs. |
 | `x-success` | no | string | — | URL opened when the operation succeeds (x-callback-url). |
 | `x-error` | no | string | — | URL opened when the operation fails (x-callback-url). |
 

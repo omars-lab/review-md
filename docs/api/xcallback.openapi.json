@@ -49,6 +49,20 @@
             "example": "d1a2b3"
           },
           {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "description": "Open in the editor (`edit`: Live Preview or Source, whichever the vault uses) or in Reading view (`read`). Omit to use the vault's default view for new tabs.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "edit",
+                "read"
+              ]
+            },
+            "example": "edit"
+          },
+          {
             "name": "x-success",
             "in": "query",
             "required": false,

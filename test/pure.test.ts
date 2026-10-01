@@ -33,6 +33,7 @@ import {
   anchorForTarget,
   digestResultParams,
   withQueryParams,
+  openViewState,
   DIGEST_URL_MAX,
   ordinalsFromLog,
   revKeyOf,
@@ -645,6 +646,14 @@ test("withQueryParams: adds to any query shape, keeps the fragment, spaces as %2
   assert.equal(withQueryParams("myapp://done?k=1", { a: "b" }), "myapp://done?k=1&a=b");
   assert.equal(withQueryParams("myapp://done?", { a: "b" }), "myapp://done?a=b");
   assert.equal(withQueryParams("myapp://done?k=1#top", { a: "&" }), "myapp://done?k=1&a=%26#top");
+});
+
+test("openViewState: edit opens the editor, read opens Reading view, no mode leaves the default", () => {
+  assert.deepEqual(openViewState("edit"), { state: { mode: "source" } });
+  assert.deepEqual(openViewState("read"), { state: { mode: "preview" } });
+  assert.deepEqual(openViewState(undefined), {});
+  // `edit` must not pin Live Preview vs Source — that stays the vault's choice.
+  assert.equal("source" in (openViewState("edit").state ?? {}), false);
 });
 
 test("digestResultParams: the digest rides along, cut and flagged when too long", () => {

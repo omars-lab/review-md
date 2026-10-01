@@ -34,6 +34,7 @@ import {
   anchorForTarget,
   digestResultParams,
   withQueryParams,
+  openViewState,
   escapeRegExp,
   MERMAID_SHAPES,
   effectiveReviewer,
@@ -1822,11 +1823,14 @@ export default class ReviewMdPlugin extends Plugin {
   private async handleUri(_op: XcallbackOperation, params: Record<string, string>): Promise<void> {
     const af = this.resolveFile(params.file);
 
+    // `mode` (edit|read) picks the view; the thread jump passes it again so
+    // following the block link can't flip the leaf back to its default view.
+    const viewState = openViewState(params.mode);
     const leaf = this.app.workspace.getLeaf(false);
-    await leaf.openFile(af);
+    await leaf.openFile(af, viewState);
 
     if (params.thread) {
-      this.app.workspace.openLinkText(`${af.path}#^${params.thread}`, af.path, false);
+      await this.app.workspace.openLinkText(`${af.path}#^${params.thread}`, af.path, false, viewState);
     }
   }
 

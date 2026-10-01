@@ -138,7 +138,10 @@ you do.
 An `obsidian://review-md-open` link opens the file focused on a thread; a
 `review-md-reply` link posts a reply — no clicking required. Add `mode=edit` to
 open the file in the editor, or `mode=read` for Reading view; without it the
-vault's default view for new tabs decides.
+vault's default view for new tabs decides. `vault=` takes the vault's name or its
+id; the links review-md copies use the id, because two vaults with the same
+folder name (several repos' `docs/`) would otherwise open whichever Obsidian
+finds first.
 
 <p align="center">
   <img src="docs/media/deeplink.gif" alt="Firing obsidian://review-md-open and review-md-reply deep links" width="420">

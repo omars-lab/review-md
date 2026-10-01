@@ -11,7 +11,7 @@
       "summary": "Open a file in the reviewer",
       "description": "Open a markdown file in the review-md reviewer and, optionally, scroll to a specific comment thread.",
       "params": [
-        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).", "example": "docs" },
+        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id.", "example": "docs" },
         { "name": "file", "required": true, "type": "string", "description": "Vault-relative path to the markdown file to open.", "example": "designs/design.md" },
         { "name": "thread", "required": false, "type": "string", "description": "Thread id (the file's `^blockId`) to scroll to after opening.", "example": "d1a2b3" },
         { "name": "mode", "required": false, "type": "string", "enum": ["edit", "read"], "description": "Open in the editor (`edit`: Live Preview or Source, whichever the vault uses) or in Reading view (`read`). Omit to use the vault's default view for new tabs.", "example": "edit" },
@@ -25,7 +25,7 @@
       "summary": "Reply to a thread",
       "description": "Append a message to an existing comment thread stored in the file's frontmatter, then open the file at that thread.",
       "params": [
-        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).", "example": "docs" },
+        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id.", "example": "docs" },
         { "name": "file", "required": true, "type": "string", "description": "Vault-relative path to the markdown file that holds the thread.", "example": "designs/design.md" },
         { "name": "thread", "required": true, "type": "string", "description": "Id of the thread to reply to.", "example": "d1a2b3" },
         { "name": "body", "required": true, "type": "string", "description": "The reply text. URL-encode newlines and special characters.", "example": "agreed — let's keep it in frontmatter" },
@@ -40,7 +40,7 @@
       "summary": "Resolve or reopen a thread",
       "description": "Mark a comment thread resolved (the default) or open again. Use it after answering a thread, so answered threads don't pile up as open.",
       "params": [
-        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).", "example": "docs" },
+        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id.", "example": "docs" },
         { "name": "file", "required": true, "type": "string", "description": "Vault-relative path to the markdown file that holds the thread.", "example": "designs/design.md" },
         { "name": "thread", "required": true, "type": "string", "description": "Id of the thread to resolve or reopen.", "example": "d1a2b3" },
         { "name": "state", "required": false, "type": "string", "enum": ["resolved", "open"], "default": "resolved", "description": "`resolved` closes the thread; `open` reopens it.", "example": "open" },
@@ -54,7 +54,7 @@
       "summary": "Start a thread",
       "description": "Start a new comment thread on a passage (found by `quote`), a diagram box (`node`), or an arrow (`from` + `to`). Pass exactly one target. A passage gets a `^id` written into the doc, as when a reviewer comments by hand.",
       "params": [
-        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).", "example": "docs" },
+        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id.", "example": "docs" },
         { "name": "file", "required": true, "type": "string", "description": "Vault-relative path to the markdown file to comment on.", "example": "designs/design.md" },
         { "name": "body", "required": true, "type": "string", "description": "The first message of the thread.", "example": "This step needs a timeout." },
         { "name": "quote", "required": false, "type": "string", "description": "Words from the passage or heading to comment on (the first passage containing them, case-insensitive).", "example": "sidecar file" },
@@ -72,7 +72,7 @@
       "summary": "Copy threads to the clipboard for an AI tool",
       "description": "Gather comment threads — from one file, or every file in the vault — into a Markdown digest (anchor, state, messages, and an open/reply link per thread) and copy it to the clipboard, ready to paste into any AI chat. Open threads only unless `resolved=include`. The same digest `npm run reviews -- list` prints from a clone.",
       "params": [
-        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).", "example": "docs" },
+        { "name": "vault", "required": true, "reserved": true, "type": "string", "description": "Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id.", "example": "docs" },
         { "name": "file", "required": false, "type": "string", "description": "Vault-relative path of one file to export. Omit to export every file with comments.", "example": "designs/design.md" },
         { "name": "text", "required": false, "type": "string", "description": "Only threads whose messages, authors or anchor contain this text (case-insensitive — the same match as the panel's search box).", "example": "frontmatter" },
         { "name": "resolved", "required": false, "type": "string", "enum": ["exclude", "include"], "default": "exclude", "description": "Whether resolved threads are included.", "example": "include" },

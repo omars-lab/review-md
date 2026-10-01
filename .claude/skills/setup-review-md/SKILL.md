@@ -86,6 +86,7 @@ Advanced → Command line interface. Same screenshot → click → screenshot di
 |---|---|
 | `Command line interface is not enabled` | The instance that owns the socket has CLI off. Turn it on, or relaunch the intended instance last. |
 | `Vault not found.` | The vault name isn't registered in *that* instance's `obsidian.json`. Register it, then relaunch. |
+| `Obsidian answered vault "docs" with <other path>` | Several open vaults share the folder name; the app answers for the first. Switch to the target vault (or close the others) and re-run. `check` and `install` stop here before changing anything (`docs/issues/setup-same-named-vaults.md`). |
 | BRAT `validateRepository … 404` | The repo is private (or the name is wrong). Use `--token-name`. |
 | every eval hangs to the 30 s timeout | A modal is open (trust dialog, error). Clear it as above. |
 | `review-md is latest` MISSING | The vault has an older build. BRAT: "Check for updates", or `install` after removing the plugin. |

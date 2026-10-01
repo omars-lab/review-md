@@ -22,7 +22,7 @@
             "name": "vault",
             "in": "query",
             "required": true,
-            "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).",
+            "description": "Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id.",
             "schema": {
               "type": "string"
             },
@@ -103,7 +103,7 @@
             "name": "vault",
             "in": "query",
             "required": true,
-            "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).",
+            "description": "Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id.",
             "schema": {
               "type": "string"
             },
@@ -191,7 +191,7 @@
             "name": "vault",
             "in": "query",
             "required": true,
-            "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).",
+            "description": "Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id.",
             "schema": {
               "type": "string"
             },
@@ -273,7 +273,7 @@
             "name": "vault",
             "in": "query",
             "required": true,
-            "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).",
+            "description": "Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id.",
             "schema": {
               "type": "string"
             },
@@ -391,7 +391,7 @@
             "name": "vault",
             "in": "query",
             "required": true,
-            "description": "Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin).",
+            "description": "Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id.",
             "schema": {
               "type": "string"
             },

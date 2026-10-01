@@ -15,7 +15,7 @@ Open a markdown file in the review-md reviewer and, optionally, scroll to a spec
 
 | Param | Required | Type | Default / Enum | Description |
 |---|---|---|---|---|
-| `vault` | yes — URL only | string | — | Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). |
+| `vault` | yes — URL only | string | — | Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id. |
 | `file` | yes | string | — | Vault-relative path to the markdown file to open. |
 | `thread` | no | string | — | Thread id (the file's `^blockId`) to scroll to after opening. |
 | `mode` | no | string | enum: `edit`, `read` | Open in the editor (`edit`: Live Preview or Source, whichever the vault uses) or in Reading view (`read`). Omit to use the vault's default view for new tabs. |
@@ -34,7 +34,7 @@ Append a message to an existing comment thread stored in the file's frontmatter,
 
 | Param | Required | Type | Default / Enum | Description |
 |---|---|---|---|---|
-| `vault` | yes — URL only | string | — | Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). |
+| `vault` | yes — URL only | string | — | Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id. |
 | `file` | yes | string | — | Vault-relative path to the markdown file that holds the thread. |
 | `thread` | yes | string | — | Id of the thread to reply to. |
 | `body` | yes | string | — | The reply text. URL-encode newlines and special characters. |
@@ -54,7 +54,7 @@ Mark a comment thread resolved (the default) or open again. Use it after answeri
 
 | Param | Required | Type | Default / Enum | Description |
 |---|---|---|---|---|
-| `vault` | yes — URL only | string | — | Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). |
+| `vault` | yes — URL only | string | — | Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id. |
 | `file` | yes | string | — | Vault-relative path to the markdown file that holds the thread. |
 | `thread` | yes | string | — | Id of the thread to resolve or reopen. |
 | `state` | no | string | enum: `resolved`, `open` | `resolved` closes the thread; `open` reopens it. |
@@ -73,7 +73,7 @@ Start a new comment thread on a passage (found by `quote`), a diagram box (`node
 
 | Param | Required | Type | Default / Enum | Description |
 |---|---|---|---|---|
-| `vault` | yes — URL only | string | — | Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). |
+| `vault` | yes — URL only | string | — | Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id. |
 | `file` | yes | string | — | Vault-relative path to the markdown file to comment on. |
 | `body` | yes | string | — | The first message of the thread. |
 | `quote` | no | string | — | Words from the passage or heading to comment on (the first passage containing them, case-insensitive). |
@@ -96,7 +96,7 @@ Gather comment threads — from one file, or every file in the vault — into a 
 
 | Param | Required | Type | Default / Enum | Description |
 |---|---|---|---|---|
-| `vault` | yes — URL only | string | — | Name of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). |
+| `vault` | yes — URL only | string | — | Name or id of the target Obsidian vault. Consumed by Obsidian to route to the vault window (required in the URL, but not delivered to the plugin). Prefer the id (the key in obsidian.json) when several vaults share a name: a name opens whichever Obsidian finds first. Links the plugin copies use the id. |
 | `file` | no | string | — | Vault-relative path of one file to export. Omit to export every file with comments. |
 | `text` | no | string | — | Only threads whose messages, authors or anchor contain this text (case-insensitive — the same match as the panel's search box). |
 | `resolved` | no | string | enum: `exclude`, `include` | Whether resolved threads are included. |

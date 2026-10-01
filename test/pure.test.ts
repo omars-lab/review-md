@@ -34,6 +34,7 @@ import {
   digestResultParams,
   withQueryParams,
   openViewState,
+  linkVault,
   DIGEST_URL_MAX,
   ordinalsFromLog,
   revKeyOf,
@@ -654,6 +655,12 @@ test("openViewState: edit opens the editor, read opens Reading view, no mode lea
   assert.deepEqual(openViewState(undefined), {});
   // `edit` must not pin Live Preview vs Source — that stays the vault's choice.
   assert.equal("source" in (openViewState("edit").state ?? {}), false);
+});
+
+test("linkVault: links route by the vault id, by name only when there is no id", () => {
+  assert.equal(linkVault("yt0docs0vault001", "docs"), "yt0docs0vault001");
+  assert.equal(linkVault(undefined, "docs"), "docs");
+  assert.equal(linkVault("", "docs"), "docs");
 });
 
 test("digestResultParams: the digest rides along, cut and flagged when too long", () => {

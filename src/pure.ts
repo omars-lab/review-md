@@ -894,3 +894,12 @@ export function openViewState(mode: string | undefined): { state?: { mode: "sour
   if (mode === "read") return { state: { mode: "preview" } };
   return {};
 }
+
+/** The `vault=` value for links this plugin hands out. Obsidian routes a link's
+ *  `vault` by name *or* by the vault's id, and names collide: several repos'
+ *  `docs/` folders are all vaults called "docs", and a name link opens whichever
+ *  Obsidian finds first. The id is unique, so prefer it; fall back to the name
+ *  if the app doesn't expose one. docs/issues/links-route-by-vault-id.md. */
+export function linkVault(appId: string | undefined, name: string): string {
+  return appId ? appId : name;
+}

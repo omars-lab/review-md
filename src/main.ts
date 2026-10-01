@@ -35,6 +35,7 @@ import {
   digestResultParams,
   withQueryParams,
   openViewState,
+  linkVault,
   escapeRegExp,
   MERMAID_SHAPES,
   effectiveReviewer,
@@ -1730,11 +1731,17 @@ export default class ReviewMdPlugin extends Plugin {
     });
   }
 
+  /** The `vault=` value for links we hand out: the vault id, which Obsidian routes
+   *  on like a name but which can't collide (`appId` isn't in the public types). */
+  linkVault(): string {
+    return linkVault((this.app as unknown as { appId?: string }).appId, this.app.vault.getName());
+  }
+
   /** The `obsidian://review-md-open?...` share link for a thread in a file. */
   buildShareUrl(file: TFile, threadId: string): string {
     const q = (s: string) => encodeURIComponent(s);
     return (
-      `obsidian://review-md-open?vault=${q(this.app.vault.getName())}` +
+      `obsidian://review-md-open?vault=${q(this.linkVault())}` +
       `&file=${q(file.path)}&thread=${q(threadId)}`
     );
   }
@@ -1747,7 +1754,7 @@ export default class ReviewMdPlugin extends Plugin {
   buildReplyUrl(file: TFile, threadId: string, author = "external"): string {
     const q = (s: string) => encodeURIComponent(s);
     return (
-      `obsidian://review-md-reply?vault=${q(this.app.vault.getName())}` +
+      `obsidian://review-md-reply?vault=${q(this.linkVault())}` +
       `&file=${q(file.path)}&thread=${q(threadId)}` +
       `&author=${q(author)}&body=${q("{{reply}}")}`
     );
@@ -1792,9 +1799,10 @@ export default class ReviewMdPlugin extends Plugin {
       files.push({ path: f.path, threads });
     }
     files.sort((a, b) => a.path.localeCompare(b.path));
-    const vault = this.app.vault.getName();
+    // The heading names the vault for a person; the links route by id.
+    const name = this.app.vault.getName();
     return {
-      text: threadsDigest(files, { scope: file ? file.path : `vault “${vault}”`, filter, vault }),
+      text: threadsDigest(files, { scope: file ? file.path : `vault “${name}”`, filter, vault: this.linkVault() }),
       count: files.reduce((n, f) => n + f.threads.length, 0),
     };
   }

@@ -9,6 +9,7 @@ import {
   MarkdownView,
   Editor,
   debounce,
+  FileSystemAdapter,
   normalizePath,
   parseYaml,
   setIcon,
@@ -43,6 +44,7 @@ import {
   threadsDigest,
   commentedLines,
   placeBlockId,
+  imageVaultPath,
   type DigestFile,
   type ExportFilter,
 } from "./pure";
@@ -968,8 +970,10 @@ export default class ReviewMdPlugin extends Plugin {
     // 2) An image.
     const img = target.closest("img");
     if (img) {
+      // Store the vault path, not the app:// address: that one holds this
+      // machine's absolute path and means nothing on anyone else's.
       const src = img.getAttribute("src") ?? "";
-      return { type: "image", src };
+      return { type: "image", src: imageVaultPath(src, this.vaultBasePath()) ?? src };
     }
     // 2b) A link — internal `[[wikilink]]` (Obsidian stashes the target on
     // `data-href`) or an external URL (`href`). After the image branch so an
@@ -1518,7 +1522,7 @@ export default class ReviewMdPlugin extends Plugin {
         (a.quote ? links.find((l) => (l.textContent ?? "").trim() === a.quote) : undefined) ??
         null;
     } else if (a.type === "image" && a.src) {
-      el = container.querySelector(`img[src="${a.src}"], img[src$="${a.src}"]`) as HTMLElement | null;
+      el = this.findImage(container, a.src);
     } else if (a.type === "mermaidNode" && a.node) {
       el = container.querySelector(`g.node[id*="-${a.node}-"], g.node[id$="-${a.node}"]`) as HTMLElement | null;
     } else if (a.type === "mermaidEdge" && a.from && a.to) {
@@ -1558,6 +1562,37 @@ export default class ReviewMdPlugin extends Plugin {
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     el.addClass("review-md-flash");
     window.setTimeout(() => el?.removeClass("review-md-flash"), 1600);
+  }
+
+  /** The vault folder on disk, or null where there is none (mobile). */
+  vaultBasePath(): string | null {
+    const adapter = this.app.vault.adapter;
+    return adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null;
+  }
+
+  /** The rendered <img> an image anchor points at. Compared by vault path, so
+   *  a thread stored as a vault path and an older one stored as an app://
+   *  address both find it (the DOM src carries an mtime query that changes). */
+  private findImage(container: HTMLElement, src: string): HTMLElement | null {
+    const base = this.vaultBasePath();
+    const want = imageVaultPath(src, base) ?? src;
+    const imgs = Array.from(container.querySelectorAll("img"));
+    return imgs.find((img) => (imageVaultPath(img.getAttribute("src") ?? "", base) ?? img.getAttribute("src")) === want) ?? null;
+  }
+
+  /**
+   * What a card shows for an image anchor: a URL the sidebar can load and the
+   * file's name. A vault image loads from the vault (so it shows whether or not
+   * the note is open); a web image loads from its own address. Null when the
+   * file is gone.
+   */
+  imagePreview(src: string): { url: string; label: string } | null {
+    const s = src.trim();
+    if (/^https?:/i.test(s)) return { url: s, label: s };
+    const path = imageVaultPath(s, this.vaultBasePath());
+    const file = path ? this.app.vault.getAbstractFileByPath(normalizePath(path)) : null;
+    if (!(file instanceof TFile)) return null;
+    return { url: this.app.vault.getResourcePath(file), label: file.path };
   }
 
   /** Validate params against the schema: required present, enums respected. */

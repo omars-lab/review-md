@@ -328,6 +328,42 @@ export function anchorChanged(
 }
 
 /**
+ * The vault-relative path behind an image anchor's `src`, or `null` when it isn't
+ * a vault file (a web image, or a path outside the vault). Obsidian renders vault
+ * images as `app://<id>/<absolute path>?<mtime>`, which only means something on
+ * the machine that made it; the vault path is the same everywhere. A src that is
+ * already a vault path comes back as is.
+ */
+export function imageVaultPath(src: string, vaultBase: string | null): string | null {
+  const s = src.trim();
+  if (!s || /^(https?|data|blob):/i.test(s)) return null;
+  const decode = (p: string) => {
+    try {
+      return decodeURIComponent(p);
+    } catch {
+      return p;
+    }
+  };
+  const m = s.match(/^app:\/\/[^/]+(\/[^?#]*)/i);
+  if (!m) return decode(s.replace(/[?#].*$/, "")).replace(/^\/+/, "") || null;
+  const abs = decode(m[1]);
+  if (!vaultBase) return null;
+  const base = vaultBase.replace(/\/+$/, "") + "/";
+  return abs.startsWith(base) ? abs.slice(base.length) : null;
+}
+
+/** An image src's file name (`hub-42.png`), decoded and without a query — what
+ *  the note's source names it by, however the src itself is written. */
+export function imageFileName(src: string): string {
+  const last = src.trim().replace(/[?#].*$/, "").split("/").pop() ?? "";
+  try {
+    return decodeURIComponent(last);
+  } catch {
+    return last;
+  }
+}
+
+/**
  * Just the content a thread points at, as it reads in `text` (the whole file) today —
  * what the per-passage staleness check hashes, and what "now reads" shows. Shared
  * by the plugin and the `reviews` CLI so both call the same threads outdated.
@@ -396,9 +432,15 @@ export function anchorContentIn(text: string, anchor: Record<string, unknown>): 
         });
       return present ? q : null;
     }
-    case "image":
+    case "image": {
       if (!a.src) return undefined;
-      return text.includes(a.src) ? a.src : null;
+      if (text.includes(a.src)) return a.src;
+      // Else by file name: the note writes `![[hub-42.png]]` or a relative path,
+      // never the `app://` address the plugin used to store.
+      const name = imageFileName(a.src);
+      if (!name) return undefined;
+      return text.includes(name) || text.includes(encodeURI(name)) ? name : null;
+    }
     case "link": {
       const href = a.href ?? "";
       const q = a.quote ?? "";
@@ -620,8 +662,8 @@ function escapeRe(s: string): string {
  *     document order.
  *   - mermaidEdge: the line of the `from … --> … to` link; else the first line
  *     naming `from` in a fence that also names `to`.
- *   - image: the first line mentioning the src (or its file name — the DOM src is
- *     an app:// URL, the source holds the vault path).
+ *   - image: the first line mentioning the src, else its file name (older threads
+ *     hold the app:// URL; the source names the file).
  *   - link: the first line mentioning the href, else the link text.
  * `null` when nothing matches (the thread sorts last).
  */
@@ -705,8 +747,8 @@ export function anchorLineIn(body: string, anchor: Record<string, unknown>): num
       if (!src) return null;
       const at = first((l) => l.includes(src));
       if (at !== null) return at;
-      const base = src.split("/").pop()?.split("?")[0] ?? "";
-      return base ? first((l) => l.includes(base)) : null;
+      const base = imageFileName(src);
+      return base ? first((l) => l.includes(base) || l.includes(encodeURI(base))) : null;
     }
     case "link": {
       const href = a.href?.trim() ?? "";
@@ -772,7 +814,8 @@ export function anchorWhere(anchor: Record<string, unknown> = {}): string {
     case "mermaidEdge":
       return `diagram edge ${s(anchor.from, 80)} → ${s(anchor.to, 80)}`;
     case "image":
-      return `image ${s(anchor.src, 120)}`;
+      // An older thread's app:// address is a machine path; its file name says enough.
+      return `image ${s(/^app:/i.test(String(anchor.src ?? "")) ? imageFileName(String(anchor.src)) : anchor.src, 120)}`;
     case "link":
       return `link ${anchor.quote ? `“${s(anchor.quote, 60)}” ` : ""}→ ${s(anchor.href, 120)}`;
     default:

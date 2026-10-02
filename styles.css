@@ -589,6 +589,33 @@ body.theme-dark {
   word-break: break-all;
 }
 
+/* A heading thread reads as a heading, not as an italic quote. */
+.review-md-text-preview.is-heading {
+  color: var(--text-normal);
+  font-style: normal;
+  font-weight: var(--font-semibold);
+}
+
+/* Image anchor: the image itself, shrunk to the card, its file path under it. */
+.review-md-image-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  margin: var(--size-4-1) 0;
+  padding: var(--size-2-2) var(--size-4-2);
+  border-left: 3px solid var(--interactive-accent);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+.review-md-image-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 160px;
+  object-fit: contain;
+  align-self: flex-start;
+  border-radius: var(--radius-s);
+}
+
 /* ---- Version staleness (rev stamp) ---- */
 .review-md-rev {
   display: none;

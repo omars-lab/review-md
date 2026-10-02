@@ -57,6 +57,11 @@ is a native Obsidian `^id` on the source block, so `[[<name>#^<blockId>]]` deep
 -links resolve even with the plugin disabled (see
 [`durable-anchoring.md`](issues/durable-anchoring.md)).
 
+An image's `src` is its path inside the vault (`shots/hub-42.png`), or the web
+address for a web image. Threads written before 0.1.3 may hold an `app://…`
+address instead; match those by file name (see
+[`image-anchor-vault-path.md`](issues/image-anchor-vault-path.md)).
+
 ## Findings input
 
 **Unresolved threads (`resolved: false`) with their anchor `quote` are the

@@ -55,6 +55,8 @@ import {
   anchorWhere,
   filterThreads,
   threadsDigest,
+  imageVaultPath,
+  imageFileName,
 } from "../src/pure.ts";
 import type { ThreadLike } from "../src/pure.ts";
 
@@ -601,6 +603,39 @@ test("anchorContentIn: a lost block id falls back to the quote, like the highlig
   assert.equal(anchorContentIn(doc, { type: "text", blockId: "4juaxl", quote: "## Related" }), "## Related");
   assert.equal(anchorContentIn(doc, { type: "text", blockId: "4juaxl", quote: "## Gone" }), null);
   assert.equal(anchorContentIn(doc, { type: "text", blockId: "4juaxl" }), null);
+});
+
+const APP_SRC =
+  "app://468bc154/Users/me/Mobile%20Documents/Vault/recon/step%20view/hub-42.png?1727900000";
+
+test("imageVaultPath: an app:// address becomes the vault path; web images and outside files are null", () => {
+  assert.equal(imageVaultPath(APP_SRC, "/Users/me/Mobile Documents/Vault"), "recon/step view/hub-42.png");
+  assert.equal(imageVaultPath(APP_SRC, "/Users/me/Mobile Documents/Vault/"), "recon/step view/hub-42.png");
+  assert.equal(imageVaultPath(APP_SRC, "/Users/someone-else/Vault"), null);
+  assert.equal(imageVaultPath(APP_SRC, null), null);
+  assert.equal(imageVaultPath("https://example.com/a.png", "/v"), null);
+  assert.equal(imageVaultPath("data:image/png;base64,AAAA", "/v"), null);
+  // Already a vault path (a thread written by this version): unchanged.
+  assert.equal(imageVaultPath("recon/step view/hub-42.png", "/v"), "recon/step view/hub-42.png");
+});
+
+test("imageFileName: decoded, query dropped, whatever the src looks like", () => {
+  assert.equal(imageFileName(APP_SRC), "hub-42.png");
+  assert.equal(imageFileName("recon/hub-42.png"), "hub-42.png");
+  assert.equal(imageFileName("a/My%20Shot.png"), "My Shot.png");
+});
+
+test("anchorContentIn / anchorLineIn: an image is found by its file name, old app:// threads too", () => {
+  const doc = "# T\n\nIntro\n\n![[hub-42.png]]\n";
+  for (const src of [APP_SRC, "recon/step view/hub-42.png", "hub-42.png"]) {
+    assert.equal(anchorContentIn(doc, { type: "image", src }), "hub-42.png");
+    assert.equal(anchorLineIn(doc, { type: "image", src }), 4);
+  }
+  assert.equal(anchorContentIn("# T\n\nno picture\n", { type: "image", src: APP_SRC }), null);
+  // A Markdown link writes spaces as %20.
+  assert.equal(anchorContentIn("![x](shots/My%20Shot.png)", { type: "image", src: "shots/My Shot.png" }), "My Shot.png");
+  // The one-line summary hides an old thread's machine path.
+  assert.equal(anchorWhere({ type: "image", src: APP_SRC }), "image hub-42.png");
 });
 
 test("anchorContentIn: diagram boxes and arrows read from mermaid fences only", () => {

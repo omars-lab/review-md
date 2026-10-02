@@ -7,6 +7,7 @@ import {
   revLabelFor,
   snippetAround,
   middleEllipsis,
+  imageFileName,
   diffThreads,
   anchorTypeLabel,
   threadMatches,
@@ -754,10 +755,12 @@ export class CommentsView extends ItemView {
     const anchorType = (thread.anchor as { type?: string })?.type;
     if (anchorType === "mermaidNode" || anchorType === "mermaidEdge") {
       this.renderMermaidPreview(el, thread);
-    } else if (anchorType === "text") {
+    } else if (anchorType === "text" || anchorType === "header") {
       this.renderTextPreview(el, thread);
     } else if (anchorType === "link") {
       this.renderLinkPreview(el, thread);
+    } else if (anchorType === "image") {
+      this.renderImagePreview(el, thread);
     }
 
     const msgsEl = el.createDiv({ cls: "review-md-messages" });
@@ -980,7 +983,7 @@ export class CommentsView extends ItemView {
 
     const type = (anchor as { type?: string }).type;
     if (type === "mermaidNode" || type === "mermaidEdge") this.renderMermaidPreview(card, draft);
-    else if (type === "text") this.renderTextPreview(card, draft);
+    else if (type === "text" || type === "header") this.renderTextPreview(card, draft);
     else if (type === "link") this.renderLinkPreview(card, draft);
     else if (type === "image") this.renderImagePreview(card, draft);
 
@@ -1027,22 +1030,33 @@ export class CommentsView extends ItemView {
     cancelBtn.onclick = cancel;
   }
 
-  /** Inline preview for an image anchor: its source path (the DOM src is an
-   *  app:// / URL, so show the path rather than re-fetching the asset). */
+  /** Inline preview for an image anchor: the image itself, shrunk to fit, with
+   *  its file path under it. Falls back to the path alone when the file is gone
+   *  or won't load. */
   private renderImagePreview(card: HTMLElement, thread: ReviewThread): void {
     const raw = (thread.anchor as { src?: unknown }).src;
     const src = typeof raw === "string" ? raw.trim() : "";
     if (!src) return;
-    const box = card.createDiv({ cls: "review-md-link-preview" });
-    box.createEl("code", { cls: "review-md-link-href", text: middleEllipsis(src) });
+    const preview = this.plugin.imagePreview(src);
+    const box = card.createDiv({ cls: "review-md-image-preview" });
+    if (preview) {
+      const img = box.createEl("img", { attr: { src: preview.url, alt: preview.label, loading: "lazy" } });
+      img.onerror = () => img.remove();
+    }
+    box.createEl("code", {
+      cls: "review-md-link-href",
+      text: middleEllipsis(preview?.label ?? imageFileName(src)),
+    });
   }
 
-  /** Render the highlighted passage as a small blockquote that fits the card. */
+  /** Render the highlighted passage as a small blockquote that fits the card;
+   *  a heading reads as a heading. */
   private renderTextPreview(card: HTMLElement, thread: ReviewThread): void {
-    const raw = (thread.anchor as { quote?: unknown }).quote;
-    const text = typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
+    const a = thread.anchor as { quote?: unknown; type?: unknown };
+    const text = typeof a.quote === "string" ? a.quote.replace(/\s+/g, " ").trim() : "";
     if (!text) return;
-    card.createEl("blockquote", { cls: "review-md-text-preview", text: middleEllipsis(text) });
+    const quote = card.createEl("blockquote", { cls: "review-md-text-preview", text: middleEllipsis(text) });
+    if (a.type === "header") quote.addClass("is-heading");
   }
 
   /** Inline preview for a link anchor: the display text plus its target href. */

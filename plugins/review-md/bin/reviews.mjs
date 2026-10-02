@@ -7481,6 +7481,14 @@ function anchorChanged(thenText, nowText, anchor) {
   if (then == null || now === void 0) return void 0;
   return then !== now;
 }
+function imageFileName(src) {
+  const last = src.trim().replace(/[?#].*$/, "").split("/").pop() ?? "";
+  try {
+    return decodeURIComponent(last);
+  } catch {
+    return last;
+  }
+}
 function anchorContentIn(text, anchor) {
   const a = anchor;
   const norm = (s) => s.replace(/\s+/g, " ").trim();
@@ -7526,9 +7534,13 @@ function anchorContentIn(text, anchor) {
       });
       return present ? q : null;
     }
-    case "image":
+    case "image": {
       if (!a.src) return void 0;
-      return text.includes(a.src) ? a.src : null;
+      if (text.includes(a.src)) return a.src;
+      const name = imageFileName(a.src);
+      if (!name) return void 0;
+      return text.includes(name) || text.includes(encodeURI(name)) ? name : null;
+    }
     case "link": {
       const href = a.href ?? "";
       const q = a.quote ?? "";
@@ -7590,7 +7602,7 @@ function anchorWhere(anchor = {}) {
     case "mermaidEdge":
       return `diagram edge ${s(anchor.from, 80)} \u2192 ${s(anchor.to, 80)}`;
     case "image":
-      return `image ${s(anchor.src, 120)}`;
+      return `image ${s(/^app:/i.test(String(anchor.src ?? "")) ? imageFileName(String(anchor.src)) : anchor.src, 120)}`;
     case "link":
       return `link ${anchor.quote ? `\u201C${s(anchor.quote, 60)}\u201D ` : ""}\u2192 ${s(anchor.href, 120)}`;
     default:

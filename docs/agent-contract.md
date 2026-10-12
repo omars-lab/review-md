@@ -62,6 +62,34 @@ address for a web image. Threads written before 0.1.3 may hold an `app://…`
 address instead; match those by file name (see
 [`image-anchor-vault-path.md`](issues/image-anchor-vault-path.md)).
 
+## One shape, two tools
+
+development-manager's page comments (comments left on a local web page) hand out
+threads in this same shape, so one reader understands both. The written contract is
+[`schema/thread.schema.json`](../schema/thread.schema.json). This repo holds the
+source, page comments keep a pinned copy, and `test/schema.test.ts` checks that what
+`reviews list --json` prints fits it. Only the shape is shared; each tool keeps its
+own storage (page comments keep one append-only file per thread).
+
+What a page comment's thread adds, all optional for a review-md reader:
+
+| Field | Means |
+|---|---|
+| `anchor.type: element` | the thread points at an element on a page, with `css`, `tag`, `label`, `box` and `commentId` |
+| `anchor.quote` as `{exact, prefix, suffix}` | the element's words, with up to 32 characters either side; review-md's own `quote` is a plain string |
+| `status` | `open`, `resolved` or `dismissed` ("not an issue"); `dismissed` also sets `resolved: true` |
+| `page`, `viewport` | the page and the window the comment was made in |
+| `shots` | pointers to pictures of the element, never the pictures |
+| `waiting`, `history`, `rev.landed`, `rev.git.dirty`, `lost` | who it waits on, each status change, the commit that landed uncommitted work, and "can't be found any more" |
+
+Rules for any reader of either tool:
+
+- **Skip what you don't know.** An unknown anchor type, field or status is not an
+  error. Read `resolved` for open or closed, whatever `status` says.
+- **Watch lines may carry events you don't know**, such as page comments'
+  `thread_dismissed`, `shot` and `shot_missing`. Skip them; the line format is the
+  same.
+
 ## Findings input
 
 **Unresolved threads (`resolved: false`) with their anchor `quote` are the

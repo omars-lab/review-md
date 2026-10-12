@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "thread.schema.json",
+  "title": "One review thread, as `show --json` prints it",
+  "description": "The thread shape shared by review-md (comments on Markdown notes) and development-manager's page comments (comments on web pages). Each tool keeps its own storage; this is what both hand out. This file is the source; page comments keep a pinned copy. Readers must ignore fields, anchor types and statuses they don't know. See docs/agent-contract.md.",
+  "type": "object",
+  "required": ["id", "resolved", "anchor", "messages"],
+  "properties": {
+    "id": { "type": "string" },
+    "resolved": { "type": "boolean", "description": "true when the thread is closed. A reader that doesn't know `status` reads a dismissed thread as resolved." },
+    "status": { "enum": ["open", "resolved", "dismissed"], "description": "Optional. Page comments always set it; review-md threads leave it out, which means open or resolved as `resolved` says." },
+    "anchor": {
+      "type": "object",
+      "required": ["type"],
+      "description": "Where the thread points. The fields that apply depend on `type`.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Known types. review-md: text, header, link (quote), mermaidNode (node), mermaidEdge (from, to), image (src). Page comments: element and text (css, tag, label, quote as an object, box). Readers skip types they don't know."
+        },
+        "quote": {
+          "type": ["string", "object"],
+          "description": "The anchored words. review-md stores the passage as a string; page comments store {exact, prefix, suffix}, with up to 32 characters either side.",
+          "required": ["exact"],
+          "properties": { "exact": { "type": "string" }, "prefix": { "type": "string" }, "suffix": { "type": "string" } }
+        },
+        "line": { "type": "number", "description": "review-md: the line the passage was on" },
+        "index": { "type": "number", "description": "review-md: which copy of a repeated passage" },
+        "blockId": { "type": "string", "description": "review-md: a native Obsidian ^id on the source block" },
+        "node": { "type": "string", "description": "review-md mermaidNode: the diagram node" },
+        "from": { "type": "string", "description": "review-md mermaidEdge: the arrow's start" },
+        "to": { "type": "string", "description": "review-md mermaidEdge: the arrow's end" },
+        "src": { "type": "string", "description": "review-md image: path in the vault, or a web address" },
+        "href": { "type": "string", "description": "review-md link: the link target" },
+        "commentId": { "type": ["string", "null"], "description": "page comments: a data-comment-id the page put on the element" },
+        "css": { "type": "string", "description": "page comments: a CSS path to the element" },
+        "tag": { "type": "string", "description": "page comments: the element's tag" },
+        "label": { "type": "string", "maxLength": 80, "description": "page comments: the element's short label" },
+        "box": {
+          "type": "object",
+          "description": "page comments: where in the element the pin sits, as fractions of its width and height",
+          "properties": { "fx": { "type": "number" }, "fy": { "type": "number" } }
+        }
+      }
+    },
+    "rev": {
+      "type": "object",
+      "description": "The version the thread was made against. review-md: bodyHash is the note body's hash; page comments: the element's hash.",
+      "properties": {
+        "bodyHash": { "type": ["string", "null"] },
+        "anchorHash": { "type": "string", "description": "review-md: hash of the anchored passage alone" },
+        "ts": { "type": "string" },
+        "git": {
+          "type": "object",
+          "properties": {
+            "commit": { "type": ["string", "null"] },
+            "blob": { "type": "string", "description": "review-md: HEAD:<path> of the note" },
+            "dirty": { "type": ["boolean", "null"], "description": "page comments: made on uncommitted work" }
+          }
+        },
+        "landed": {
+          "type": "object",
+          "description": "page comments: the commit that later landed the uncommitted work the comment was made on. rev.git still says where it was made.",
+          "required": ["commit"],
+          "properties": { "commit": { "type": "string" }, "ts": { "type": "string" } }
+        }
+      }
+    },
+    "messages": {
+      "type": "array",
+      "minItems": 1,
+      "description": "In order; the first is the opening comment.",
+      "items": {
+        "type": "object",
+        "required": ["author", "ts", "body"],
+        "properties": {
+          "author": { "type": "string" },
+          "ts": { "type": "string" },
+          "body": { "type": "string" },
+          "commit": { "type": "string", "description": "the commit a reply names" },
+          "edited": { "type": "string" }
+        }
+      }
+    },
+    "outdated": { "type": "boolean", "description": "review-md --json: the note changed since the thread was made" },
+    "lost": { "type": "boolean", "description": "true when the anchored passage or element can't be found any more; left out when found" },
+    "page": {
+      "type": "object",
+      "description": "page comments: the page the thread is on",
+      "properties": { "url": { "type": "string" }, "path": { "type": "string" }, "title": { "type": "string" } }
+    },
+    "viewport": {
+      "type": ["object", "null"],
+      "description": "page comments: the window the comment was made in",
+      "properties": {
+        "w": { "type": "number" },
+        "h": { "type": "number" },
+        "dpr": { "type": "number" },
+        "scrollX": { "type": "number" },
+        "scrollY": { "type": "number" },
+        "scheme": { "enum": ["light", "dark"] }
+      }
+    },
+    "waiting": { "enum": ["claude", "human", null], "description": "page comments: who the thread is waiting on" },
+    "history": {
+      "type": "array",
+      "description": "page comments: each status change",
+      "items": {
+        "type": "object",
+        "required": ["status", "author", "ts"],
+        "properties": {
+          "status": { "enum": ["open", "resolved", "dismissed"] },
+          "author": { "type": "string" },
+          "ts": { "type": "string" },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "shots": {
+      "type": "array",
+      "description": "page comments: pictures of the element. Each has exactly one of icloud, local or error.",
+      "items": {
+        "type": "object",
+        "required": ["role", "ts"],
+        "properties": {
+          "role": { "enum": ["comment", "after"], "description": "comment: taken when the comment was made; after: Claude's shot after a fix" },
+          "ts": { "type": "string" },
+          "author": { "type": "string" },
+          "icloud": { "type": "string", "description": "path relative to the iCloud Drive root" },
+          "local": { "type": "string", "description": "path relative to the repo's .page-comments/ folder" },
+          "sha": { "type": "string", "description": "first 12 hex characters of the picture's sha256" },
+          "commit": { "type": "string", "description": "after shots: the commit the shot was taken against" },
+          "error": { "type": "string", "description": "why the capture failed, in place of a pointer" },
+          "path": { "type": "string", "description": "show --json only: the full path of the picture on this machine" }
+        }
+      }
+    }
+  }
+}

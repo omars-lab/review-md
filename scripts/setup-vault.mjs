@@ -112,8 +112,18 @@ function run(file, args, timeoutMs, ev) {
 
 /** Run a JS expression in the vault's app context; returns the parsed JSON result.
  *  `code` must be a single expression; it's wrapped in an async IIFE and JSON-encoded. */
+/** The vault folder every eval must land in, once known. The CLI's `vault=<name>` is not a
+ *  promise: with two vaults open it can answer from whichever window has focus, so a step
+ *  meant for one vault lands in the other. Each eval checks the folder first and runs nothing
+ *  when it is the wrong one. */
+let pinnedBase = null;
+
 function evalJs(vault, code) {
-  const wrapped = `(async () => JSON.stringify(await (${code})))()`;
+  const pin = JSON.stringify(pinnedBase);
+  const wrapped =
+    `(async () => { const b = app.vault.adapter.basePath; ` +
+    `if (${pin} && b !== ${pin}) return JSON.stringify({ __wrongVault: b }); ` +
+    `return JSON.stringify(await (${code})); })()`;
   const r = run(CLI, ["eval", `vault=${vault}`, `code=${wrapped}`], CLI_TIMEOUT_MS, "cli");
   if (!r.ok) throw new Error(`obsidian-cli failed: ${r.err.trim() || r.out.trim()}`);
   // The CLI echoes the app's console lines first; the result is the last `=> ` line.
@@ -122,7 +132,13 @@ function evalJs(vault, code) {
   const res = out.startsWith("=> ") && at < 0 ? out : at >= 0 ? out.slice(at + 1) : null;
   if (!res) throw new Error(out || "obsidian-cli returned nothing");
   const body = res.slice(3);
-  return body === "undefined" ? undefined : JSON.parse(body);
+  const value = body === "undefined" ? undefined : JSON.parse(body);
+  if (value && typeof value === "object" && "__wrongVault" in value)
+    throw new Error(
+      `Obsidian answered vault "${vault}" from ${value.__wrongVault}, not ${pinnedBase}; nothing was run there. ` +
+        `Bring the ${pinnedBase} window to the front (or close the other vault's window) and re-run.`,
+    );
+  return value;
 }
 
 /** The live app answers `vault=<name>` with the first open vault of that name, and
@@ -329,6 +345,7 @@ async function cmdInstall(opts) {
   // Every live step below (enable BRAT, BRAT's add, enable review-md) lands in whatever
   // vault answered, so a same-named vault would be changed instead of this one.
   if (wrong) die(wrong);
+  pinnedBase = vault;
 
   if (!pluginFacts(vault, BRAT_ID).installed) await installBratFiles(vault);
   else log("brat_present", { version: pluginFacts(vault, BRAT_ID).version });
@@ -397,8 +414,11 @@ async function cmdInstall(opts) {
 // ---- verify ----------------------------------------------------------------------------
 
 function cmdVerify(opts) {
-  const name = opts.vault;
-  if (!name) die("verify needs --vault <vault name>");
+  // A path pins every step to that folder; a bare name pins to whichever folder answers first.
+  const asPath = opts.vault?.startsWith("/") ? resolve(opts.vault) : null;
+  const name = asPath ? basename(asPath) : opts.vault;
+  if (!name) die("verify needs --vault <vault name or abs path>");
+  pinnedBase = asPath;
   const results = [];
   const check = (label, fn) => {
     try {
@@ -419,6 +439,7 @@ function cmdVerify(opts) {
       `({ loaded: !!app.plugins.plugins["${PLUGIN_ID}"], version: app.plugins.manifests["${PLUGIN_ID}"]?.version ?? null, base: app.vault.adapter.basePath })`,
     );
     vaultPath = s.base;
+    pinnedBase = s.base;
     assert(s.loaded, `review-md is not loaded in ${s.base}`);
     // The name can match several open vaults; show which one answered.
     return `v${s.version} in ${s.base}`;

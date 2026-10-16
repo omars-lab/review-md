@@ -252,8 +252,10 @@ Claude Code, grab `reviews.mjs` from the release. It needs only Node 18+:
 `node reviews.mjs help`.
 
 From a clone, the same install runs from the shell: `make setup-check VAULT=/abs/vault`
-→ `make setup-install VAULT=/abs/vault` → `make setup-verify VAULT=<vault name>` (needs the
-vault open with Settings → General → Command line interface on; details in the
+→ `make setup-install VAULT=/abs/vault` → `make setup-verify VAULT=/abs/vault` (needs the
+vault open with Settings → General → Command line interface on; with two vaults open, the command
+line answers from the one last in front, so every step checks it is in `/abs/vault` and stops,
+running nothing, when it is not; details in the
 [`setup-review-md`](.claude/skills/setup-review-md/SKILL.md) skill).
 
 ### Into your own vault, from source

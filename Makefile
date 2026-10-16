@@ -68,7 +68,7 @@ setup-check: ## Is review-md installed via BRAT + current? (read-only): make set
 setup-install: ## Install BRAT + review-md through BRAT (idempotent; vault open in Obsidian): make setup-install VAULT=<abs path>
 	node scripts/setup-vault.mjs install --vault "$(VAULT)" $(if $(TOKEN_NAME),--token-name "$(TOKEN_NAME)")
 
-setup-verify: ## Prove review-md works in the live app (PASS/FAIL): make setup-verify VAULT=<vault name>
+setup-verify: ## Prove review-md works in the live app (PASS/FAIL): make setup-verify VAULT=<abs path, or vault name>
 	node scripts/setup-vault.mjs verify --vault "$(VAULT)"
 
 version: ## Bump version in lock-step (manifest/package/versions): make version V=<x.y.z>

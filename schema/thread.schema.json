@@ -78,7 +78,8 @@
           "ts": { "type": "string" },
           "body": { "type": "string" },
           "commit": { "type": "string", "description": "the commit a reply names" },
-          "edited": { "type": "string" }
+          "edited": { "type": "string" },
+          "ask": { "type": "string", "description": "page comments: the one person this reply asks; left out when it asks no one" }
         }
       }
     },
@@ -102,6 +103,7 @@
       }
     },
     "waiting": { "enum": ["claude", "human", null], "description": "page comments: who the thread is waiting on" },
+    "asking": { "type": ["string", "null"], "description": "page comments: the person the latest asking reply named, until they reply or the thread closes; null when no one" },
     "history": {
       "type": "array",
       "description": "page comments: each status change",

@@ -15,10 +15,10 @@
 // Exit codes: 0 = OK (even with zero threads), 2 = usage error, 3 = no sidecar /
 // thread not found, 4 = couldn't reach Obsidian.
 
-import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, renameSync, watch as fsWatch } from "node:fs";
+import { readFileSync, existsSync, statSync, realpathSync, readdirSync, writeFileSync, renameSync, watch as fsWatch } from "node:fs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { dirname, join, basename, extname, relative, resolve } from "node:path";
+import { dirname, join, basename, extname, relative, resolve, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
   filterThreads,
@@ -28,6 +28,7 @@ import {
   latestTs,
   sinceCutoff,
   anchorContentIn,
+  anchorLineIn,
   anchorChanged,
   anchorWhere,
   anchorForTarget,
@@ -322,11 +323,14 @@ Example:
       const [f] = load(doc, { includeResolved: true });
       const t = f.threads.find((x) => x.id === id);
       if (!t) fail(3, `no thread ${id} on ${doc} (try: reviews list ${doc})`);
-      if (flags.json) return process.stdout.write(JSON.stringify({ file: f.path, ...t }, null, 2) + "\n");
+      const [withSrc] = withSource(f, [t]);
+      if (flags.json) return process.stdout.write(JSON.stringify({ file: f.path, ...withSrc }, null, 2) + "\n");
       const vault = vaultRootOf(doc) ? basename(vaultRootOf(doc)) : undefined;
       process.stdout.write(
         threadsDigest([{ ...f, threads: [t] }], { scope: `${f.path} · ${id}`, filter: { includeResolved: !!t.resolved }, vault }),
       );
+      const src = withSrc.anchor.source[0];
+      process.stdout.write(`\nSource: ${src.file}${src.line ? `:${src.line}` : ""} (by line)\n`);
     },
   },
 
@@ -864,7 +868,49 @@ function vaultPath(doc) {
   return root ? relative(root, resolve(doc)) : doc;
 }
 
+/** Where the doc sits in its git repo, for `anchor.source`: the path from the repo's
+ *  root, the short HEAD commit, and whether the doc has uncommitted changes. null
+ *  when the doc isn't in a git repo (or git isn't there). One lookup per doc. */
+function gitPlace(doc) {
+  try {
+    const real = realpathSync(resolve(doc));
+    // A git hook sets GIT_DIR / GIT_INDEX_FILE for its own repo; left in, they would
+    // point every lookup here at that repo whatever folder the doc is in.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
+    const git = (args) => execFileSync("git", ["-C", dirname(real), ...args], { encoding: "utf8", env, stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const top = realpathSync(git(["rev-parse", "--show-toplevel"]));
+    const commit = git(["rev-parse", "--short", "HEAD"]);
+    const dirty = git(["status", "--porcelain", "--", real]) !== "";
+    return { path: relative(top, real).split(sep).join("/"), commit, dirty };
+  } catch {
+    return null;
+  }
+}
+
+/** Give each thread `anchor.source`: one entry saying where in the repo's source it
+ *  points (docs/agent-contract.md, "One shape, two tools"). Worked out when the JSON
+ *  is printed, never stored, so it can't go stale. `line` is 1-based and is where the
+ *  anchor sits in the doc now (anchorLineIn), else the line recorded when the comment
+ *  was made; left out when neither is known. `file` is the path from the git root, or
+ *  from the vault root when the doc isn't in git. `commit`/`dirty` only with git. */
+function withSource(f, threads) {
+  const text = existsSync(f.file) ? readFileSync(f.file, "utf8") : "";
+  const place = gitPlace(f.file);
+  return threads.map((t) => {
+    const at = anchorLineIn(text, t.anchor ?? {});
+    const entry = { file: place?.path ?? f.path.split(sep).join("/") };
+    if (at !== null) entry.line = at + 1;
+    entry.how = "line";
+    if (place) {
+      entry.commit = place.commit;
+      entry.dirty = place.dirty;
+    }
+    return { ...t, anchor: { ...t.anchor, source: [entry] } };
+  });
+}
+
 function printJson(target, files) {
+  files = files.map((f) => ({ ...f, threads: withSource(f, f.threads) }));
   const isDir = existsSync(target) && statSync(target).isDirectory();
   // `file` is always the on-disk path, so it can be passed straight back to
   // `show`/`reply`; `vaultPath` is the same doc as Obsidian (and the links) name it.

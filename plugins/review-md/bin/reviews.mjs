@@ -3997,10 +3997,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep, value } = collItem;
+        const { start, key, sep: sep2, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep?.[0],
+          next: key ?? sep2?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -4014,7 +4014,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep) {
+          if (!keyProps.anchor && !keyProps.tag && !sep2) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map.comment)
@@ -4038,7 +4038,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep ?? [], {
+        const valueProps = resolveProps.resolveProps(sep2 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -4054,7 +4054,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep2, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -4145,7 +4145,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end) {
         let hasSpace = false;
-        let sep = "";
+        let sep2 = "";
         for (const token of end) {
           const { source, type } = token;
           switch (type) {
@@ -4159,13 +4159,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep + cb;
-              sep = "";
+                comment += sep2 + cb;
+              sep2 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep += source;
+                sep2 += source;
               hasSpace = true;
               break;
             default:
@@ -4208,18 +4208,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep, value } = collItem;
+        const { start, key, sep: sep2, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep?.[0],
+          next: key ?? sep2?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep && !value) {
+          if (!props.anchor && !props.tag && !sep2 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -4273,8 +4273,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep, null, props, onError);
+        if (!isMap && !sep2 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep2, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -4286,7 +4286,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep ?? [], {
+          const valueProps = resolveProps.resolveProps(sep2 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -4297,8 +4297,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap && !props.found && ctx.options.strict) {
-              if (sep)
-                for (const st of sep) {
+              if (sep2)
+                for (const st of sep2) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -4315,7 +4315,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep2, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4495,7 +4495,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep = "";
+      let sep2 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines[i][0].slice(trimIndent) + "\n";
@@ -4512,24 +4512,24 @@ var require_resolve_block_scalar = __commonJS({
           indent = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep + indent.slice(trimIndent) + content;
-          sep = "\n";
+          value += sep2 + indent.slice(trimIndent) + content;
+          sep2 = "\n";
         } else if (indent.length > trimIndent || content[0] === "	") {
-          if (sep === " ")
-            sep = "\n";
-          else if (!prevMoreIndented && sep === "\n")
-            sep = "\n\n";
-          value += sep + indent.slice(trimIndent) + content;
-          sep = "\n";
+          if (sep2 === " ")
+            sep2 = "\n";
+          else if (!prevMoreIndented && sep2 === "\n")
+            sep2 = "\n\n";
+          value += sep2 + indent.slice(trimIndent) + content;
+          sep2 = "\n";
           prevMoreIndented = true;
         } else if (content === "") {
-          if (sep === "\n")
+          if (sep2 === "\n")
             value += "\n";
           else
-            sep = "\n";
+            sep2 = "\n";
         } else {
-          value += sep + content;
-          sep = " ";
+          value += sep2 + content;
+          sep2 = " ";
           prevMoreIndented = false;
         }
       }
@@ -4712,25 +4712,25 @@ var require_resolve_flow_scalar = __commonJS({
         trimBoth = /^[ \t]+|[ \t]+$/g;
       }
       let res = match[1].replace(trimEnd, "");
-      let sep = " ";
+      let sep2 = " ";
       let pos = line.lastIndex;
       while (match = line.exec(source)) {
         const lm = match[1].replace(trimBoth, "");
         if (lm === "") {
-          if (sep === "\n")
-            res += sep;
+          if (sep2 === "\n")
+            res += sep2;
           else
-            sep = "\n";
+            sep2 = "\n";
         } else {
-          res += sep + lm;
-          sep = " ";
+          res += sep2 + lm;
+          sep2 = " ";
         }
         pos = line.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep + (match?.[1] ?? "");
+      return res + sep2 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -5540,14 +5540,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep, value }) {
+    function stringifyItem({ start, key, sep: sep2, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep)
-        for (const st of sep)
+      if (sep2)
+        for (const st of sep2)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -6714,18 +6714,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start = getFirstKeyStartProps(prev);
-          let sep;
+          let sep2;
           if (scalar.end) {
-            sep = scalar.end;
-            sep.push(this.sourceToken);
+            sep2 = scalar.end;
+            sep2.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep = [this.sourceToken];
+            sep2 = [this.sourceToken];
           const map = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep }]
+            items: [{ start, key: scalar, sep: sep2 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -6878,15 +6878,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep = it.sep;
-                  sep.push(this.sourceToken);
+                  const sep2 = it.sep;
+                  sep2.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep }]
+                    items: [{ start: start2, key, sep: sep2 }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -7080,13 +7080,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep = fc.end.splice(1, fc.end.length);
-            sep.push(this.sourceToken);
+            const sep2 = fc.end.splice(1, fc.end.length);
+            sep2.push(this.sourceToken);
             const map = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep }]
+              items: [{ start, key: fc, sep: sep2 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map;
@@ -7366,10 +7366,10 @@ var require_dist = __commonJS({
 
 // scripts/reviews.mjs
 var import_yaml = __toESM(require_dist(), 1);
-import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, renameSync, watch as fsWatch } from "node:fs";
+import { readFileSync, existsSync, statSync, realpathSync, readdirSync, writeFileSync, renameSync, watch as fsWatch } from "node:fs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { dirname, join, basename, extname, relative, resolve } from "node:path";
+import { dirname, join, basename, extname, relative, resolve, sep } from "node:path";
 
 // src/pure.ts
 var WORKING_REV = "working";
@@ -7584,6 +7584,89 @@ function latestTs(t) {
     if (!Number.isNaN(n)) max = n;
   }
   return max;
+}
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function anchorLineIn(body, anchor) {
+  const a = anchor;
+  const lines = body.split(/\r?\n/);
+  const norm = (s) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  const first = (pred, from = 0, to = lines.length) => {
+    for (let i = from; i < to; i++) if (pred(lines[i])) return i;
+    return null;
+  };
+  const names = (id) => {
+    const re = new RegExp(`(^|[^\\w])${escapeRe(id)}([^\\w]|$)`);
+    return (l) => re.test(l);
+  };
+  const fences = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^[ \t]*`{3,}\s*mermaid\s*$/.test(lines[i])) continue;
+    let j = i + 1;
+    while (j < lines.length && !/^[ \t]*`{3,}\s*$/.test(lines[j])) j++;
+    fences.push([i + 1, j]);
+    i = j;
+  }
+  const byQuote = () => {
+    const q = a.quote ? norm(a.quote).slice(0, 60) : "";
+    return q ? first((l) => norm(l).includes(q)) : null;
+  };
+  switch (a.type) {
+    case "mermaidNode": {
+      if (!a.node) return null;
+      const has = names(a.node);
+      for (const [s, e] of fences) {
+        const at = first(has, s, e);
+        if (at !== null) return at;
+      }
+      return null;
+    }
+    case "mermaidEdge": {
+      if (!a.from || !a.to) return null;
+      const link = new RegExp(
+        `(^|[^\\w])${escapeRe(a.from)}\\b.*?(?:--+>?|==+>?|-\\.-*>?|~~+).*?\\b${escapeRe(a.to)}([^\\w]|$)`
+      );
+      for (const [s, e] of fences) {
+        const at = first((l) => link.test(l), s, e);
+        if (at !== null) return at;
+      }
+      const hasFrom = names(a.from);
+      const hasTo = names(a.to);
+      for (const [s, e] of fences) {
+        if (first(hasTo, s, e) === null) continue;
+        const at = first(hasFrom, s, e);
+        if (at !== null) return at;
+      }
+      return null;
+    }
+    case "text":
+    case "header": {
+      if (a.blockId) {
+        const idRe = new RegExp(`(^|\\s)\\^${escapeRe(a.blockId)}[ \\t]*$`);
+        const at2 = first((l) => idRe.test(l));
+        if (at2 !== null) return at2;
+      }
+      const at = byQuote();
+      if (at !== null) return at;
+      return typeof a.line === "number" && Number.isFinite(a.line) ? a.line : null;
+    }
+    case "image": {
+      const src = a.src?.trim() ?? "";
+      if (!src) return null;
+      const at = first((l) => l.includes(src));
+      if (at !== null) return at;
+      const base = imageFileName(src);
+      return base ? first((l) => l.includes(base) || l.includes(encodeURI(base))) : null;
+    }
+    case "link": {
+      const href = a.href?.trim() ?? "";
+      const at = href ? first((l) => l.includes(href)) : null;
+      return at ?? byQuote();
+    }
+    default:
+      return byQuote();
+  }
 }
 function sinceCutoff(spec, now) {
   const age = spec.trim().match(/^(\d+)\s*([mhdw])$/i);
@@ -8058,11 +8141,16 @@ Example:
       const [f] = load(doc, { includeResolved: true });
       const t = f.threads.find((x) => x.id === id);
       if (!t) fail(3, `no thread ${id} on ${doc} (try: reviews list ${doc})`);
-      if (flags.json) return process.stdout.write(JSON.stringify({ file: f.path, ...t }, null, 2) + "\n");
+      const [withSrc] = withSource(f, [t]);
+      if (flags.json) return process.stdout.write(JSON.stringify({ file: f.path, ...withSrc }, null, 2) + "\n");
       const vault = vaultRootOf(doc) ? basename(vaultRootOf(doc)) : void 0;
       process.stdout.write(
         threadsDigest([{ ...f, threads: [t] }], { scope: `${f.path} \xB7 ${id}`, filter: { includeResolved: !!t.resolved }, vault })
       );
+      const src = withSrc.anchor.source[0];
+      process.stdout.write(`
+Source: ${src.file}${src.line ? `:${src.line}` : ""} (by line)
+`);
     }
   },
   diff: {
@@ -8546,7 +8634,36 @@ function vaultPath(doc) {
   const root = vaultRootOf(doc);
   return root ? relative(root, resolve(doc)) : doc;
 }
+function gitPlace(doc) {
+  try {
+    const real = realpathSync(resolve(doc));
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
+    const git = (args) => execFileSync("git", ["-C", dirname(real), ...args], { encoding: "utf8", env, stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const top = realpathSync(git(["rev-parse", "--show-toplevel"]));
+    const commit = git(["rev-parse", "--short", "HEAD"]);
+    const dirty = git(["status", "--porcelain", "--", real]) !== "";
+    return { path: relative(top, real).split(sep).join("/"), commit, dirty };
+  } catch {
+    return null;
+  }
+}
+function withSource(f, threads) {
+  const text = existsSync(f.file) ? readFileSync(f.file, "utf8") : "";
+  const place = gitPlace(f.file);
+  return threads.map((t) => {
+    const at = anchorLineIn(text, t.anchor ?? {});
+    const entry = { file: place?.path ?? f.path.split(sep).join("/") };
+    if (at !== null) entry.line = at + 1;
+    entry.how = "line";
+    if (place) {
+      entry.commit = place.commit;
+      entry.dirty = place.dirty;
+    }
+    return { ...t, anchor: { ...t.anchor, source: [entry] } };
+  });
+}
 function printJson(target, files) {
+  files = files.map((f) => ({ ...f, threads: withSource(f, f.threads) }));
   const isDir = existsSync(target) && statSync(target).isDirectory();
   const out = isDir ? { root: target, files: files.map(({ file, path, uid, threads }) => ({ file, vaultPath: path, uid, threads })) } : { uid: files[0].uid, file: files[0].file, vaultPath: files[0].path, threads: files[0].threads };
   process.stdout.write(JSON.stringify(out, null, 2) + "\n");

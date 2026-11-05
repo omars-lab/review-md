@@ -117,3 +117,18 @@ test("schema: a page comment's thread fits, and an unknown anchor type is allowe
   assert.deepEqual(check(schema, page), []);
   assert.deepEqual(check(schema, { ...page, anchor: { type: "somethingNew" } }), [], "readers skip anchor types they don't know");
 });
+
+test("schema: anchor.source is a list of {file, line, how, commit, dirty}; an empty list is allowed", () => {
+  const base = { id: "t_8f3a2c", resolved: false, messages: [msg] };
+  const source = [
+    { file: "src/pages/GoLinks.tsx", line: 142, how: "data-comment-id", commit: "5e07266", dirty: true },
+    { file: "src/content/golinks.md", how: "quote" },
+    { file: "docs/sample.md", line: 12, how: "something-new" },
+  ];
+  assert.deepEqual(check(schema, { ...base, anchor: { type: "element", source } }), []);
+  assert.deepEqual(check(schema, { ...base, anchor: { type: "text", line: 12, source: [{ file: "docs/sample.md", line: 12, how: "line" }] } }), []);
+  assert.deepEqual(check(schema, { ...base, anchor: { type: "element", source: [] } }), [], "empty: searched, nothing found");
+  assert.notDeepEqual(check(schema, { ...base, anchor: { type: "element", source: [{ file: "a.tsx" }] } }), [], "how is required");
+  assert.notDeepEqual(check(schema, { ...base, anchor: { type: "element", source: [{ how: "quote" }] } }), [], "file is required");
+  assert.notDeepEqual(check(schema, { ...base, anchor: { type: "element", source: "a.tsx:3" } }), [], "a list, not a string");
+});

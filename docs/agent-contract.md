@@ -82,6 +82,12 @@ What a page comment's thread adds, all optional for a review-md reader:
 | `shots` | pointers to pictures of the element, never the pictures |
 | `waiting`, `history`, `rev.landed`, `rev.git.dirty`, `lost` | who it waits on, each status change, the commit that landed uncommitted work, and "can't be found any more" |
 
+One field both tools carry:
+
+| Field | Means |
+|---|---|
+| `anchor.source` | where in the repo's source the thread points, best guess first: a list of `{file, line, how, commit, dirty}`. `how` says what found it: `line` (review-md: the anchor is the line), `data-comment-id`, `quote`, `label` or `data-source`. Page comments fill it when the comment lands and after each commit, and it can name several files at once (the component, the data file holding the words, the stylesheet). Missing means not worked out yet; an empty list means searched and nothing found, so say that rather than guess |
+
 Rules for any reader of either tool:
 
 - **Skip what you don't know.** An unknown anchor type, field or status is not an

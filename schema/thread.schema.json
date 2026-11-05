@@ -40,6 +40,24 @@
           "type": "object",
           "description": "page comments: where in the element the pin sits, as fractions of its width and height",
           "properties": { "fx": { "type": "number" }, "fy": { "type": "number" } }
+        },
+        "source": {
+          "type": "array",
+          "description": "Where in the repo's source the thread points, best guess first. Optional: a missing list means not worked out yet; an empty list means searched and nothing found (say so; never guess). review-md writes one entry, how: line. Page comments fill it when the comment lands and again after each commit: the component, the data file holding the words, the stylesheet.",
+          "items": {
+            "type": "object",
+            "required": ["file", "how"],
+            "properties": {
+              "file": { "type": "string", "description": "Path from the repo's root, with forward slashes" },
+              "line": { "type": "number", "description": "1-based line; left out when only the file is known" },
+              "how": {
+                "type": "string",
+                "description": "What found it. Known: line (the anchor is the line), data-comment-id, quote (the exact words), label, data-source (stamped by the dev server). Readers show values they don't know as they are."
+              },
+              "commit": { "type": "string", "description": "The commit the file and line were read at" },
+              "dirty": { "type": "boolean", "description": "true when the file had uncommitted changes then" }
+            }
+          }
         }
       }
     },
